@@ -1,0 +1,1 @@
+ALTER TABLE `funnel_bottlenecks` MODIFY COLUMN `stage` enum('ads','leads','sales','revenue','funnel') NOT NULL;
