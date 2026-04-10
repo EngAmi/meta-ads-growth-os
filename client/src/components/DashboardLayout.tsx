@@ -24,8 +24,9 @@ import { useIsMobile } from "@/hooks/useMobile";
 import {
   LayoutDashboard, TrendingUp, Users, Target, GitBranch,
   Lightbulb, Brain, BarChart3, Calendar, Trophy, LogOut,
-  PanelLeft, Zap, ChevronRight
+  PanelLeft, Zap, ChevronRight, Database
 } from "lucide-react";
+import DateRangePicker from "./DateRangePicker";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -60,6 +61,12 @@ const menuGroups = [
       { icon: BarChart3, label: "Weekly Reports", path: "/weekly" },
       { icon: Calendar, label: "Forecasting", path: "/forecast" },
       { icon: Trophy, label: "Leaderboards", path: "/leaderboard" },
+    ]
+  },
+  {
+    label: "Settings",
+    items: [
+      { icon: Database, label: "Data Sources", path: "/data-sources" },
     ]
   }
 ];
@@ -251,12 +258,20 @@ function DashboardLayoutContent({ children, setSidebarWidth }: { children: React
       </div>
 
       <SidebarInset>
+        {/* Desktop topbar */}
+        {!isMobile && (
+          <div className="flex border-b border-border h-14 items-center justify-between bg-background/95 px-4 backdrop-blur sticky top-0 z-40">
+            <span className="text-sm font-medium text-foreground">{activeMenuItem?.label ?? "Growth OS"}</span>
+            <DateRangePicker />
+          </div>
+        )}
         {isMobile && (
           <div className="flex border-b border-border h-14 items-center justify-between bg-background/95 px-3 backdrop-blur sticky top-0 z-40">
             <div className="flex items-center gap-2">
               <SidebarTrigger className="h-9 w-9 rounded-lg" />
               <span className="text-sm font-medium text-foreground">{activeMenuItem?.label ?? "Growth OS"}</span>
             </div>
+            <DateRangePicker />
           </div>
         )}
         <main className="flex-1 overflow-auto">{children}</main>

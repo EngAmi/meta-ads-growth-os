@@ -17,3 +17,29 @@
 - [x] Agent & Campaign Leaderboards page (sortable rankings)
 - [x] Color-coded status indicators (green/yellow/red)
 - [x] Unit tests (24 tests passing)
+
+## Data Sources Feature
+- [x] DB schema: dataConnections table (Meta API token, account ID, status, last sync)
+- [x] DB schema: importJobs table (file name, status, rows imported, errors)
+- [x] Backend: saveConnection, testConnection, syncFromMeta procedures
+- [x] Backend: file upload endpoint + CSV/Excel parser for Meta report format
+- [x] Backend: map Meta report columns → adInsights table rows
+- [x] Frontend: Data Sources page with three tabs (API Connect / File Upload / WhatsApp)
+- [x] Frontend: Meta API connection form (token, account ID, test + save + sync)
+- [x] Frontend: File upload zone (CSV/Excel drag-and-drop, column preview, import)
+- [x] Frontend: Import history table (file name, date, rows, status)
+- [x] Navigation: Data Sources link in sidebar under Settings
+- [x] Tests: data source router tests
+
+## Next Steps Features
+- [x] Fix TypeScript errors in routers.ts (adInsights insert type cast)
+- [x] Finish Data Sources page (Meta API connect + CSV/Excel upload + import history)
+- [x] Global date range context (DateRangeProvider) shared across all pages
+- [x] Date range picker component in DashboardLayout header (desktop + mobile)
+- [x] WhatsApp webhook endpoint (/api/webhook/whatsapp) with signature verification
+- [x] Auto lead scoring logic on incoming WhatsApp messages (Arabic + English)
+- [x] Fake lead detection patterns
+- [x] WhatsApp lead pushed to leads table with intentLevel and leadScore
+- [x] WhatsApp configuration tab with setup instructions, webhook URL, verify token
+- [x] Recent WhatsApp leads list with intent badges
+- [x] Tests: 24 tests passing, TypeScript clean

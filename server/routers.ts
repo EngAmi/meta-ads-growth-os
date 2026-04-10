@@ -7,7 +7,8 @@ import {
   adsAccounts, campaigns, adSets, ads, adInsights,
   leads, salesAgents, salesActivities,
   funnelBottlenecks, recommendations,
-  dailySummaries, weeklyReports
+  dailySummaries, weeklyReports,
+  dataConnections, importJobs
 } from "../drizzle/schema";
 import { desc, eq, sql, and, gte, lte, count, sum, avg } from "drizzle-orm";
 import { z } from "zod";
@@ -708,6 +709,319 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         .orderBy(desc(sql`SUM(${adInsights.revenue})`));
     }),
   }),
-});
 
+  // ─── Data Sources ───────────────────────────────────────────────────────────────────
+  dataSources: router({
+    // ─ Connections ─────────────────────────────────────────────────────────────────
+    listConnections: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(dataConnections).orderBy(desc(dataConnections.updatedAt));
+    }),
+
+    saveConnection: protectedProcedure.input(z.object({
+      id: z.number().optional(),
+      name: z.string().min(1),
+      accessToken: z.string().min(1),
+      adAccountId: z.string().min(1),
+      syncDays: z.number().default(30),
+    })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      if (input.id) {
+        await db.update(dataConnections).set({
+          name: input.name,
+          accessToken: input.accessToken,
+          adAccountId: input.adAccountId,
+          syncDays: input.syncDays,
+          status: 'disconnected',
+          lastError: null,
+        }).where(eq(dataConnections.id, input.id));
+        return { id: input.id };
+      } else {
+        const [result] = await db.insert(dataConnections).values({
+          platform: 'meta_ads',
+          name: input.name,
+          accessToken: input.accessToken,
+          adAccountId: input.adAccountId,
+          syncDays: input.syncDays,
+          status: 'disconnected',
+        });
+        return { id: (result as any).insertId };
+      }
+    }),
+
+    testConnection: protectedProcedure.input(z.object({
+      accessToken: z.string(),
+      adAccountId: z.string(),
+    })).mutation(async ({ input }) => {
+      // Call Meta Graph API to verify the token and account
+      try {
+        const accountId = input.adAccountId.startsWith('act_') ? input.adAccountId : `act_${input.adAccountId}`;
+        const url = `https://graph.facebook.com/v19.0/${accountId}?fields=id,name,currency,account_status&access_token=${input.accessToken}`;
+        const res = await fetch(url);
+        const data = await res.json() as any;
+        if (data.error) {
+          return { success: false, error: data.error.message, accountName: null };
+        }
+        return { success: true, error: null, accountName: data.name, currency: data.currency };
+      } catch (e: any) {
+        return { success: false, error: e.message || 'Network error', accountName: null };
+      }
+    }),
+
+    syncConnection: protectedProcedure.input(z.object({
+      connectionId: z.number(),
+    })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const [conn] = await db.select().from(dataConnections).where(eq(dataConnections.id, input.connectionId));
+      if (!conn) throw new Error("Connection not found");
+
+      // Mark as syncing
+      await db.update(dataConnections).set({ status: 'syncing' }).where(eq(dataConnections.id, input.connectionId));
+
+      try {
+        const accountId = conn.adAccountId!.startsWith('act_') ? conn.adAccountId! : `act_${conn.adAccountId}`;
+        const since = new Date();
+        since.setDate(since.getDate() - (conn.syncDays || 30));
+        const sinceStr = since.toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0];
+
+        const fields = 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,clicks,ctr,cpc,cpm,reach,frequency,date_start,actions,action_values,cost_per_action_type';
+        const url = `https://graph.facebook.com/v19.0/${accountId}/insights?fields=${fields}&time_range={"since":"${sinceStr}","until":"${today}"}&time_increment=1&level=campaign&limit=500&access_token=${conn.accessToken}`;
+
+        const res = await fetch(url);
+        const json = await res.json() as any;
+
+        if (json.error) {
+          await db.update(dataConnections).set({ status: 'error', lastError: json.error.message }).where(eq(dataConnections.id, input.connectionId));
+          return { success: false, error: json.error.message, rowsImported: 0 };
+        }
+
+        const rows = json.data || [];
+        let imported = 0;
+
+        for (const row of rows) {
+          // Find or create campaign
+          const existingCampaigns = await db.select({ id: campaigns.id })
+            .from(campaigns).where(eq(campaigns.campaignId, row.campaign_id)).limit(1);
+
+          let campaignDbId: number;
+          if (existingCampaigns.length > 0) {
+            campaignDbId = existingCampaigns[0].id;
+          } else {
+            const [ins] = await db.insert(campaigns).values({
+              campaignId: row.campaign_id,
+              accountId: 1,
+              name: row.campaign_name,
+              status: 'active',
+            });
+            campaignDbId = (ins as any).insertId;
+          }
+
+          const leads_count = row.actions?.find((a: any) => a.action_type === 'lead')?.value || 0;
+          const conversions_count = row.actions?.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0;
+          const revenue = row.action_values?.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0;
+          const cpl = leads_count > 0 ? (parseFloat(row.spend || 0) / leads_count) : 0;
+
+          await db.insert(adInsights).values({
+            campaignId: campaignDbId,
+            date: new Date(row.date_start),
+            spend: String(row.spend || 0),
+            impressions: parseInt(row.impressions || 0),
+            clicks: parseInt(row.clicks || 0),
+            ctr: String(parseFloat(row.ctr || 0)),
+            cpc: String(parseFloat(row.cpc || 0)),
+            cpm: String(parseFloat(row.cpm || 0)),
+            reach: parseInt(row.reach || 0),
+            frequency: String(parseFloat(row.frequency || 0)),
+            leads: parseInt(leads_count),
+            costPerLead: String(cpl),
+            conversions: parseInt(conversions_count),
+            revenue: String(parseFloat(revenue)),
+          } as any);
+          imported++;
+        }
+
+        await db.update(dataConnections).set({
+          status: 'connected',
+          lastSyncAt: new Date(),
+          lastSyncRows: imported,
+          lastError: null,
+        }).where(eq(dataConnections.id, input.connectionId));
+
+        return { success: true, rowsImported: imported, error: null };
+      } catch (e: any) {
+        await db.update(dataConnections).set({ status: 'error', lastError: e.message }).where(eq(dataConnections.id, input.connectionId));
+        return { success: false, error: e.message, rowsImported: 0 };
+      }
+    }),
+
+    deleteConnection: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      await db.delete(dataConnections).where(eq(dataConnections.id, input.id));
+      return { success: true };
+    }),
+
+    // ─ Import Jobs ─────────────────────────────────────────────────────────────────
+    listImports: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(importJobs).orderBy(desc(importJobs.createdAt)).limit(20);
+    }),
+
+    processImport: protectedProcedure.input(z.object({
+      jobId: z.number(),
+    })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const [job] = await db.select().from(importJobs).where(eq(importJobs.id, input.jobId));
+      if (!job) throw new Error("Import job not found");
+      if (!job.previewData) throw new Error("No data to import");
+
+      await db.update(importJobs).set({ status: 'processing' }).where(eq(importJobs.id, input.jobId));
+
+      try {
+        const rows = job.previewData as any[];
+        const mapping = (job.columnMapping || {}) as Record<string, string>;
+        let imported = 0;
+        let skipped = 0;
+
+        // Find or create default account
+        const existingAccounts = await db.select({ id: adsAccounts.id }).from(adsAccounts).limit(1);
+        let accountDbId = existingAccounts[0]?.id || 1;
+
+        for (const row of rows) {
+          try {
+            const campaignName = row[mapping.campaign_name || 'Campaign name'] || row['Campaign name'] || row['campaign_name'] || 'Imported Campaign';
+            const campaignIdRaw = row[mapping.campaign_id || 'Campaign ID'] || row['Campaign ID'] || row['campaign_id'] || `import_${Date.now()}_${imported}`;
+            const dateRaw = row[mapping.date || 'Day'] || row['Day'] || row['Date'] || row['date'];
+            const spend = parseFloat(row[mapping.spend || 'Amount spent (USD)'] || row['Amount spent (USD)'] || row['Spend'] || row['spend'] || 0);
+            const impressions = parseInt(row[mapping.impressions || 'Impressions'] || row['Impressions'] || row['impressions'] || 0);
+            const clicks = parseInt(row[mapping.clicks || 'Clicks (all)'] || row['Clicks (all)'] || row['Link clicks'] || row['Clicks'] || row['clicks'] || 0);
+            const ctr = parseFloat(row[mapping.ctr || 'CTR (all)'] || row['CTR (all)'] || row['CTR (link click-through rate)'] || row['CTR'] || row['ctr'] || 0);
+            const cpc = parseFloat(row[mapping.cpc || 'CPC (all)'] || row['CPC (all)'] || row['CPC (cost per link click)'] || row['CPC'] || row['cpc'] || 0);
+            const cpm = parseFloat(row[mapping.cpm || 'CPM (cost per 1,000 impressions)'] || row['CPM (cost per 1,000 impressions)'] || row['CPM'] || row['cpm'] || 0);
+            const reach = parseInt(row[mapping.reach || 'Reach'] || row['Reach'] || row['reach'] || 0);
+            const leads = parseInt(row[mapping.leads || 'Leads'] || row['Leads'] || row['leads'] || 0);
+            const conversions = parseInt(row[mapping.conversions || 'Results'] || row['Results'] || row['Conversions'] || row['conversions'] || 0);
+            const revenue = parseFloat(row[mapping.revenue || 'Purchase ROAS (return on ad spend)'] || row['Revenue'] || row['revenue'] || 0);
+            const country = row[mapping.country || 'Country'] || row['Country'] || row['country'] || null;
+
+            if (!dateRaw || spend === 0 && impressions === 0) { skipped++; continue; }
+
+            const parsedDate = new Date(dateRaw);
+            if (isNaN(parsedDate.getTime())) { skipped++; continue; }
+
+            // Upsert campaign
+            const existingCampaigns = await db.select({ id: campaigns.id })
+              .from(campaigns).where(eq(campaigns.campaignId, String(campaignIdRaw))).limit(1);
+
+            let campaignDbId: number;
+            if (existingCampaigns.length > 0) {
+              campaignDbId = existingCampaigns[0].id;
+            } else {
+              const [ins] = await db.insert(campaigns).values({
+                campaignId: String(campaignIdRaw),
+                accountId: accountDbId,
+                name: campaignName,
+                status: 'active',
+                country: country,
+              });
+              campaignDbId = (ins as any).insertId;
+            }
+
+             const costPerLead = leads > 0 ? spend / leads : 0;
+            await db.insert(adInsights).values({
+              campaignId: campaignDbId,
+              date: parsedDate,
+              spend: String(spend),
+              impressions,
+              clicks,
+              ctr: String(ctr),
+              cpc: String(cpc),
+              cpm: String(cpm),
+              reach,
+              leads,
+              costPerLead: String(costPerLead),
+              conversions,
+              revenue: String(revenue),
+              country: country ?? undefined,
+            } as any);
+            imported++;
+          } catch {
+            skipped++;
+          }
+        }
+
+        await db.update(importJobs).set({
+          status: 'completed',
+          importedRows: imported,
+          skippedRows: skipped,
+          totalRows: rows.length,
+        }).where(eq(importJobs.id, input.jobId));
+
+        return { success: true, imported, skipped };
+      } catch (e: any) {
+        await db.update(importJobs).set({ status: 'failed', errorMessage: e.message }).where(eq(importJobs.id, input.jobId));
+        return { success: false, error: e.message, imported: 0, skipped: 0 };
+      }
+    }),
+
+     deleteImport: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      await db.delete(importJobs).where(eq(importJobs.id, input.id));
+      return { success: true };
+    }),
+  }),
+
+  // ─── WhatsApp Webhook Settings ────────────────────────────────────────────
+  whatsapp: router({
+    getConfig: publicProcedure.query(() => {
+      return {
+        webhookUrl: null as string | null, // will be set after publish
+        verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || "growth_os_verify_token",
+        hasAppSecret: !!process.env.WHATSAPP_APP_SECRET,
+        endpointPath: "/api/webhook/whatsapp",
+        instructions: [
+          "1. Go to Meta for Developers → Your App → WhatsApp → Configuration",
+          "2. Set Callback URL to your deployed domain + /api/webhook/whatsapp",
+          "3. Set Verify Token to the value shown below",
+          "4. Subscribe to the 'messages' webhook field",
+          "5. Add WHATSAPP_APP_SECRET and WHATSAPP_VERIFY_TOKEN as environment secrets",
+        ],
+      };
+    }),
+
+    getRecentLeads: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      // Return leads that came from WhatsApp (stored in contactInfo.channel)
+      const result = await db.select({
+        id: leads.id,
+        phone: leads.phone,
+        name: leads.name,
+        status: leads.status,
+        intentLevel: leads.intentLevel,
+        leadScore: leads.leadScore,
+        isFake: leads.isFake,
+        firstContactAt: leads.firstContactAt,
+        contactInfo: leads.contactInfo,
+      }).from(leads)
+        .orderBy(desc(leads.firstContactAt))
+        .limit(50);
+      return result.filter((l: any) => {
+        try {
+          const info = typeof l.contactInfo === 'string' ? JSON.parse(l.contactInfo) : l.contactInfo;
+          return info?.channel === 'whatsapp';
+        } catch { return false; }
+      });
+    }),
+  }),
+});
 export type AppRouter = typeof appRouter;

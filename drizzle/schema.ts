@@ -196,6 +196,45 @@ export const dailySummaries = mysqlTable("daily_summaries", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+// ─── Data Connections (Meta API) ────────────────────────────────────────────
+export const dataConnections = mysqlTable("data_connections", {
+  id: int("id").autoincrement().primaryKey(),
+  platform: mysqlEnum("platform", ["meta_ads"]).default("meta_ads").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  accessToken: text("accessToken"),
+  adAccountId: varchar("adAccountId", { length: 64 }),
+  status: mysqlEnum("connStatus", ["connected", "disconnected", "error", "syncing"]).default("disconnected").notNull(),
+  lastSyncAt: timestamp("lastSyncAt"),
+  lastSyncRows: int("lastSyncRows").default(0),
+  lastError: text("lastError"),
+  syncDays: int("syncDays").default(30),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type DataConnection = typeof dataConnections.$inferSelect;
+export type InsertDataConnection = typeof dataConnections.$inferInsert;
+
+// ─── Import Jobs (CSV/Excel uploads) ─────────────────────────────────────────
+export const importJobs = mysqlTable("import_jobs", {
+  id: int("id").autoincrement().primaryKey(),
+  fileName: varchar("fileName", { length: 255 }).notNull(),
+  fileSize: int("fileSize"),
+  source: mysqlEnum("importSource", ["meta_csv", "meta_excel", "manual"]).default("meta_csv").notNull(),
+  status: mysqlEnum("importStatus", ["pending", "processing", "completed", "failed"]).default("pending").notNull(),
+  totalRows: int("totalRows").default(0),
+  importedRows: int("importedRows").default(0),
+  skippedRows: int("skippedRows").default(0),
+  errorMessage: text("errorMessage"),
+  columnMapping: json("columnMapping"),
+  previewData: json("previewData"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ImportJob = typeof importJobs.$inferSelect;
+export type InsertImportJob = typeof importJobs.$inferInsert;
+
 // ─── Weekly Reports ───────────────────────────────────────────────────────────
 export const weeklyReports = mysqlTable("weekly_reports", {
   id: int("id").autoincrement().primaryKey(),
