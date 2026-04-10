@@ -24,7 +24,7 @@ import { useIsMobile } from "@/hooks/useMobile";
 import {
   LayoutDashboard, TrendingUp, Users, Target, GitBranch,
   Lightbulb, Brain, BarChart3, Calendar, Trophy, LogOut,
-  PanelLeft, Zap, ChevronRight, Database
+  PanelLeft, Zap, ChevronRight, Database, Home
 } from "lucide-react";
 import DateRangePicker from "./DateRangePicker";
 import { CSSProperties, useEffect, useRef, useState } from "react";
@@ -109,14 +109,36 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               Your complete marketing analytics and sales intelligence platform.
             </p>
           </div>
-          <Button
-            onClick={() => { window.location.href = getLoginUrl(); }}
-            size="lg"
-            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
-          >
-            Sign in to continue
-            <ChevronRight className="ml-2 h-4 w-4" />
-          </Button>
+          <div className="flex flex-col gap-3 w-full">
+            <Button
+              onClick={() => { window.location.href = getLoginUrl(); }}
+              size="lg"
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
+            >
+              Sign in to continue
+              <ChevronRight className="ml-2 h-4 w-4" />
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { window.location.href = "/"; }}
+                className="flex-1 border-border text-muted-foreground hover:text-foreground gap-2"
+              >
+                <Home className="h-4 w-4" />
+                Return Home
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { window.location.href = "/"; }}
+                className="flex-1 border-border text-muted-foreground hover:text-foreground gap-2"
+              >
+                <LayoutDashboard className="h-4 w-4" />
+                Dashboard
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -180,12 +202,16 @@ function DashboardLayoutContent({ children, setSidebarWidth }: { children: React
                 <PanelLeft className="h-4 w-4 text-muted-foreground" />
               </button>
               {!isCollapsed && (
-                <div className="flex items-center gap-2 min-w-0">
+                <button
+                  onClick={() => setLocation("/")}
+                  className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity focus:outline-none"
+                  title="Go to Dashboard"
+                >
                   <div className="h-6 w-6 rounded-md bg-primary/20 flex items-center justify-center shrink-0">
                     <Zap className="h-3.5 w-3.5 text-primary" />
                   </div>
                   <span className="font-bold tracking-tight text-sm gradient-text truncate">Growth OS</span>
-                </div>
+                </button>
               )}
             </div>
           </SidebarHeader>

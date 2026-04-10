@@ -43,3 +43,8 @@
 - [x] WhatsApp configuration tab with setup instructions, webhook URL, verify token
 - [x] Recent WhatsApp leads list with intent badges
 - [x] Tests: 24 tests passing, TypeScript clean
+
+## Navigation Improvements
+- [x] Add "Return Home" and "Go to Dashboard" buttons to the 404 Not Found page
+- [x] Add "Return Home" and "Go to Dashboard" buttons to the login screen
+- [x] Add Home shortcut in sidebar header logo area (clickable logo)
