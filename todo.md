@@ -56,3 +56,9 @@
 - [x] Add Open Graph meta tags (og:title, og:description, og:type)
 - [x] H1 heading rendered by PageHeader component ("Executive Dashboard")
 - [x] Multiple H2 headings: KPIs (sr-only), Funnel Flow, Revenue vs Ad Spend, Revenue by Country, Critical Funnel Issues, Top AI-Recommended Actions, Sales Agent Performance
+
+## Connect Data CTA Button
+- [x] Add "Connect Meta Ads" banner/button to Dashboard page header area
+- [x] Add two quick-action buttons: "Connect Meta API" and "Upload CSV Report"
+- [x] Add same CTA to Ads Performance page header (compact button pair)
+- [x] Buttons navigate to /data-sources with the correct tab pre-selected

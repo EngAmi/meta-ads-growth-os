@@ -1,9 +1,11 @@
+import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { TrendingUp, DollarSign, MousePointer, Users, Globe } from "lucide-react";
+import { TrendingUp, DollarSign, MousePointer, Users, Globe, Link2, Upload } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "wouter";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Legend, LineChart, Line
@@ -21,6 +23,7 @@ const CHART_COLORS = ["oklch(0.62 0.19 258)", "oklch(0.72 0.16 162)", "oklch(0.8
 type SortKey = "spend" | "leads" | "conversions" | "revenue" | "avgCtr" | "avgCpl";
 
 export default function AdsPerformance() {
+  const [, setLocation] = useLocation();
   const { data: campaigns, isLoading } = trpc.ads.campaigns.useQuery();
   const { data: insights } = trpc.ads.insights.useQuery({ days: 30 });
   const { data: byCountry } = trpc.ads.byCountry.useQuery();
@@ -73,7 +76,24 @@ export default function AdsPerformance() {
         title="Ads Performance"
         description="Meta Ads campaigns, ad sets, and creative performance"
         icon={TrendingUp}
-      />
+      >
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setLocation("/data-sources?tab=api")}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[oklch(0.62_0.19_258)] text-white text-xs font-semibold hover:bg-[oklch(0.55_0.19_258)] transition-colors"
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            Connect Meta API
+          </button>
+          <button
+            onClick={() => setLocation("/data-sources?tab=upload")}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card text-foreground text-xs font-semibold hover:bg-muted transition-colors"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Upload CSV
+          </button>
+        </div>
+      </PageHeader>
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
