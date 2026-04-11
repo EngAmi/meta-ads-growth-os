@@ -1,3 +1,4 @@
+import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -5,6 +6,7 @@ import { StatusBadge, SeverityBadge } from "@/components/ui/StatusBadge";
 import { LayoutDashboard, DollarSign, Users, Target, TrendingUp, AlertTriangle, Lightbulb, ArrowRight, Zap, Activity } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from "recharts";
 import { useLocation } from "wouter";
+import { useEffect } from "react";
 
 const COLORS = ["oklch(0.62 0.19 258)", "oklch(0.72 0.16 162)", "oklch(0.82 0.17 85)", "oklch(0.65 0.22 25)", "oklch(0.68 0.18 305)"];
 
@@ -22,6 +24,19 @@ export default function Dashboard() {
   const { data: byAgent } = trpc.dashboard.revenueByAgent.useQuery();
   const { data: insights } = trpc.ads.insights.useQuery({ days: 14 });
   const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    document.title = "Growth OS – Marketing Analytics & Sales Intelligence";
+    // Ensure meta description is present for SPAs
+    let metaDesc = document.querySelector('meta[name="description"]');
+    if (!metaDesc) {
+      metaDesc = document.createElement("meta");
+      (metaDesc as HTMLMetaElement).name = "description";
+      document.head.appendChild(metaDesc);
+    }
+    (metaDesc as HTMLMetaElement).content =
+      "Growth OS is a unified marketing analytics and sales intelligence platform. Track Meta Ads performance, score leads, diagnose your funnel, and get AI-powered growth recommendations.";
+  }, []);
 
   if (isLoading) {
     return (
@@ -74,6 +89,7 @@ export default function Dashboard() {
       </PageHeader>
 
       {/* KPI Grid */}
+      <h2 className="sr-only">Key Performance Indicators</h2>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           title="Total Revenue"
@@ -116,7 +132,7 @@ export default function Dashboard() {
       {/* Funnel Flow */}
       <div className="rounded-xl border border-border bg-card p-5">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-sm font-semibold text-foreground">Funnel Flow</h2>
+          <h2 className="text-sm font-semibold text-foreground" aria-label="Marketing Funnel Flow: Ads to Leads to Qualified to Revenue">Funnel Flow</h2>
           <span className="text-xs text-muted-foreground">Ads → Leads → Qualified → Revenue</span>
         </div>
         <div className="grid grid-cols-4 gap-0 relative">
@@ -147,7 +163,7 @@ export default function Dashboard() {
         {/* Revenue vs Spend Chart */}
         <div className="lg:col-span-2 rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-foreground">Revenue vs Spend (14 days)</h2>
+            <h2 className="text-sm font-semibold text-foreground">Revenue vs Ad Spend – Last 14 Days</h2>
           </div>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
@@ -202,7 +218,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-[oklch(0.65_0.22_25)]" />
-              Critical Issues
+              Critical Funnel Issues
             </h2>
             <button onClick={() => setLocation("/funnel")} className="text-xs text-primary hover:underline">View all</button>
           </div>
@@ -226,7 +242,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Lightbulb className="h-4 w-4 text-[oklch(0.82_0.17_85)]" />
-              Top Actions
+              Top AI-Recommended Actions
             </h2>
             <button onClick={() => setLocation("/recommendations")} className="text-xs text-primary hover:underline">View all</button>
           </div>
@@ -250,7 +266,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Zap className="h-4 w-4 text-primary" />
-              Agent Performance
+              Sales Agent Performance
             </h2>
             <button onClick={() => setLocation("/leaderboard")} className="text-xs text-primary hover:underline">Full board</button>
           </div>

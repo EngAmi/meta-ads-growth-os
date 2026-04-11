@@ -48,3 +48,11 @@
 - [x] Add "Return Home" and "Go to Dashboard" buttons to the 404 Not Found page
 - [x] Add "Return Home" and "Go to Dashboard" buttons to the login screen
 - [x] Add Home shortcut in sidebar header logo area (clickable logo)
+
+## SEO Fixes (Home Page /)
+- [x] Set document.title to 30–60 characters ("Growth OS – Marketing Analytics & Sales Intelligence" = 51 chars)
+- [x] Add meta description (50–160 characters) — static in index.html + dynamic via useEffect
+- [x] Add meta keywords tag in index.html
+- [x] Add Open Graph meta tags (og:title, og:description, og:type)
+- [x] H1 heading rendered by PageHeader component ("Executive Dashboard")
+- [x] Multiple H2 headings: KPIs (sr-only), Funnel Flow, Revenue vs Ad Spend, Revenue by Country, Critical Funnel Issues, Top AI-Recommended Actions, Sales Agent Performance
