@@ -7,6 +7,7 @@ import { LayoutDashboard, DollarSign, Users, Target, TrendingUp, AlertTriangle, 
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from "recharts";
 import { useLocation } from "wouter";
 import { useEffect } from "react";
+import { toast } from "sonner";
 
 const COLORS = ["oklch(0.62 0.19 258)", "oklch(0.72 0.16 162)", "oklch(0.82 0.17 85)", "oklch(0.65 0.22 25)", "oklch(0.68 0.18 305)"];
 
@@ -23,7 +24,16 @@ export default function Dashboard() {
   const { data: byCountry } = trpc.dashboard.revenueByCountry.useQuery();
   const { data: byAgent } = trpc.dashboard.revenueByAgent.useQuery();
   const { data: insights } = trpc.ads.insights.useQuery({ days: 14 });
-  const { data: connStatus } = trpc.dataSources.connectionStatus.useQuery();
+  const { data: connStatus, refetch: refetchConnStatus } = trpc.dataSources.connectionStatus.useQuery();
+  const syncNow = trpc.dataSources.syncNow.useMutation({
+    onSuccess: (result) => {
+      refetchConnStatus();
+      toast.success(`Sync complete — ${result.imported} rows imported${result.errors > 0 ? `, ${result.errors} errors` : ''}`);
+    },
+    onError: (err) => {
+      toast.error(`Sync failed: ${err.message}`);
+    },
+  });
   const [, setLocation] = useLocation();
 
   useEffect(() => {
@@ -117,12 +127,22 @@ export default function Dashboard() {
               </span>
             )}
           </div>
-          <button
-            onClick={() => setLocation("/data-sources")}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
-          >
-            Manage sources <ChevronRight className="h-3 w-3" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => syncNow.mutate()}
+              disabled={syncNow.isPending}
+              className="flex items-center gap-1.5 text-xs font-semibold text-[oklch(0.72_0.16_162)] hover:text-foreground bg-[oklch(0.72_0.16_162)/10] hover:bg-[oklch(0.72_0.16_162)/20] border border-[oklch(0.72_0.16_162)/25] px-3 py-1.5 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${syncNow.isPending ? 'animate-spin' : ''}`} />
+              {syncNow.isPending ? 'Syncing...' : 'Sync Now'}
+            </button>
+            <button
+              onClick={() => setLocation("/data-sources")}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Manage <ChevronRight className="h-3 w-3" />
+            </button>
+          </div>
         </div>
       ) : (
         // ── Not connected state: full CTA banner ─────────────────────────────

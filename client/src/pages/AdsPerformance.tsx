@@ -3,9 +3,10 @@ import { trpc } from "@/lib/trpc";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { TrendingUp, DollarSign, MousePointer, Users, Globe, Link2, Upload } from "lucide-react";
+import { TrendingUp, DollarSign, MousePointer, Users, Globe, Link2, Upload, CheckCircle2, RefreshCw, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
+import { toast } from "sonner";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Legend, LineChart, Line
@@ -24,6 +25,16 @@ type SortKey = "spend" | "leads" | "conversions" | "revenue" | "avgCtr" | "avgCp
 
 export default function AdsPerformance() {
   const [, setLocation] = useLocation();
+  const { data: connStatus, refetch: refetchConnStatus } = trpc.dataSources.connectionStatus.useQuery();
+  const syncNow = trpc.dataSources.syncNow.useMutation({
+    onSuccess: (result: { imported: number; errors: number; duration: number }) => {
+      refetchConnStatus();
+      toast.success(`Sync complete — ${result.imported} rows imported${result.errors > 0 ? `, ${result.errors} errors` : ''}`);
+    },
+    onError: (err: { message: string }) => {
+      toast.error(`Sync failed: ${err.message}`);
+    },
+  });
   const { data: campaigns, isLoading } = trpc.ads.campaigns.useQuery();
   const { data: insights } = trpc.ads.insights.useQuery({ days: 30 });
   const { data: byCountry } = trpc.ads.byCountry.useQuery();
@@ -78,20 +89,58 @@ export default function AdsPerformance() {
         icon={TrendingUp}
       >
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setLocation("/data-sources?tab=api")}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[oklch(0.62_0.19_258)] text-white text-xs font-semibold hover:bg-[oklch(0.55_0.19_258)] transition-colors"
-          >
-            <Link2 className="h-3.5 w-3.5" />
-            Connect Meta API
-          </button>
-          <button
-            onClick={() => setLocation("/data-sources?tab=upload")}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card text-foreground text-xs font-semibold hover:bg-muted transition-colors"
-          >
-            <Upload className="h-3.5 w-3.5" />
-            Upload CSV
-          </button>
+          {connStatus?.hasActiveConnection ? (
+            <>
+              <div className="flex items-center gap-1.5 text-xs text-[oklch(0.72_0.16_162)] bg-[oklch(0.72_0.16_162)/10] border border-[oklch(0.72_0.16_162)/25] px-3 py-1.5 rounded-lg">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>Meta connected</span>
+                {connStatus.lastSyncedAt && (
+                  <span className="text-muted-foreground flex items-center gap-1">
+                    <RefreshCw className="h-3 w-3" />
+                    {(() => {
+                      const diff = Date.now() - new Date(connStatus.lastSyncedAt).getTime();
+                      const mins = Math.floor(diff / 60000);
+                      const hrs = Math.floor(mins / 60);
+                      if (hrs > 0) return `${hrs}h ago`;
+                      if (mins > 0) return `${mins}m ago`;
+                      return "just now";
+                    })()}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => syncNow.mutate()}
+                disabled={syncNow.isPending}
+                className="flex items-center gap-1.5 text-xs font-semibold text-[oklch(0.72_0.16_162)] hover:text-foreground bg-[oklch(0.72_0.16_162)/10] hover:bg-[oklch(0.72_0.16_162)/20] border border-[oklch(0.72_0.16_162)/25] px-3 py-1.5 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${syncNow.isPending ? 'animate-spin' : ''}`} />
+                {syncNow.isPending ? 'Syncing...' : 'Sync Now'}
+              </button>
+              <button
+                onClick={() => setLocation("/data-sources")}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Manage <ChevronRight className="h-3 w-3" />
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setLocation("/data-sources?tab=api")}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[oklch(0.62_0.19_258)] text-white text-xs font-semibold hover:bg-[oklch(0.55_0.19_258)] transition-colors"
+              >
+                <Link2 className="h-3.5 w-3.5" />
+                Connect Meta API
+              </button>
+              <button
+                onClick={() => setLocation("/data-sources?tab=upload")}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card text-foreground text-xs font-semibold hover:bg-muted transition-colors"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Upload CSV
+              </button>
+            </>
+          )}
         </div>
       </PageHeader>
 

@@ -69,3 +69,10 @@
 - [x] Dashboard: show "Last synced X ago" chip when connected
 - [x] Lead Quality page: smart header — CTA buttons when not connected, green status chip when connected
 - [x] Funnel Diagnosis page: smart header — CTA buttons when not connected, green status chip when connected
+
+## Suggested Improvements (Round 3)
+- [x] Backend: add dataSources.syncNow mutation (triggers Meta sync + sends owner notification on completion)
+- [x] Dashboard: add "Sync Now" button to the green connected status chip
+- [x] Dashboard: spinning RefreshCw icon while sync is in progress + toast on success/failure
+- [x] Notification: owner alert on sync complete (rows imported, errors, duration) + failure alert
+- [x] Ads Performance: upgraded to context-aware smart header (connected chip + Sync Now + Manage / CTA buttons when not connected)

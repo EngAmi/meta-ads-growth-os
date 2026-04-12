@@ -13,6 +13,7 @@ import {
 import { desc, eq, sql, and, gte, lte, count, sum, avg } from "drizzle-orm";
 import { z } from "zod";
 import { invokeLLM } from "./_core/llm";
+import { notifyOwner } from "./_core/notification";
 
 export const appRouter = router({
   system: systemRouter,
@@ -977,6 +978,71 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       if (!db) throw new Error("DB unavailable");
       await db.delete(importJobs).where(eq(importJobs.id, input.id));
       return { success: true };
+    }),
+    syncNow: protectedProcedure.mutation(async () => {
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+      const all = await db.select().from(dataConnections).orderBy(desc(dataConnections.updatedAt));
+      const conn = all.find(c => c.status === 'connected' || c.status === 'syncing');
+      if (!conn) throw new Error("No active Meta Ads connection found. Please connect your account first.");
+      const startTime = Date.now();
+      await db.update(dataConnections).set({ status: 'syncing' }).where(eq(dataConnections.id, conn.id));
+      try {
+        const syncDays = conn.syncDays || 30;
+        const endDate = new Date().toISOString().split('T')[0];
+        const startDate = new Date(Date.now() - syncDays * 86400000).toISOString().split('T')[0];
+        const fields = 'campaign_id,campaign_name,spend,impressions,clicks,ctr,cpc,cpm,reach,actions,action_values';
+        const url = `https://graph.facebook.com/v19.0/act_${conn.adAccountId}/insights?fields=${fields}&time_range={"since":"${startDate}","until":"${endDate}"}&level=campaign&limit=500&access_token=${conn.accessToken}`;
+        let imported = 0;
+        let errors = 0;
+        try {
+          const res = await fetch(url);
+          const json = await res.json() as any;
+          if (json.error) throw new Error(json.error.message);
+          const rows = json.data || [];
+          for (const row of rows) {
+            try {
+              const spend = parseFloat(row.spend || '0');
+              const impressions = parseInt(row.impressions || '0');
+              const clicks = parseInt(row.clicks || '0');
+              const ctr = parseFloat(row.ctr || '0');
+              const cpc = parseFloat(row.cpc || '0');
+              const cpm = parseFloat(row.cpm || '0');
+              const reach = parseInt(row.reach || '0');
+              const leads = (row.actions || []).find((a: any) => a.action_type === 'lead')?.value || 0;
+              const revenue = (row.action_values || []).find((a: any) => a.action_type === 'purchase')?.value || 0;
+              const existingCampaigns = await db.select({ id: campaigns.id }).from(campaigns).where(eq(campaigns.campaignId, String(row.campaign_id))).limit(1);
+              let campaignDbId: number;
+              if (existingCampaigns.length > 0) {
+                campaignDbId = existingCampaigns[0].id;
+              } else {
+                const [ins] = await db.insert(campaigns).values({ campaignId: String(row.campaign_id), accountId: conn.id, name: row.campaign_name || 'Unknown', status: 'active' });
+                campaignDbId = (ins as any).insertId;
+              }
+              await db.insert(adInsights).values({ campaignId: campaignDbId, date: new Date(), spend: String(spend), impressions, clicks, ctr: String(ctr), cpc: String(cpc), cpm: String(cpm), reach, leads: parseInt(String(leads)), costPerLead: leads > 0 ? String(spend / parseInt(String(leads))) : '0', conversions: 0, revenue: String(revenue) } as any);
+              imported++;
+            } catch { errors++; }
+          }
+        } catch { errors++; }
+        const duration = Math.round((Date.now() - startTime) / 1000);
+        await db.update(dataConnections).set({ status: 'connected', lastSyncAt: new Date(), lastSyncRows: imported }).where(eq(dataConnections.id, conn.id));
+        try {
+          await notifyOwner({
+            title: `✅ Meta Ads Sync Complete — ${conn.name}`,
+            content: `Sync finished in ${duration}s.\n• Rows imported: ${imported}\n• Errors: ${errors}\n• Account: ${conn.adAccountId}\n• Period: last ${syncDays} days`,
+          });
+        } catch { /* non-critical */ }
+        return { success: true, imported, errors, duration };
+      } catch (e: any) {
+        await db.update(dataConnections).set({ status: 'error', lastError: e.message }).where(eq(dataConnections.id, conn.id));
+        try {
+          await notifyOwner({
+            title: `❌ Meta Ads Sync Failed — ${conn.name}`,
+            content: `Sync failed after ${Math.round((Date.now() - startTime) / 1000)}s.\nError: ${e.message}`,
+          });
+        } catch { /* non-critical */ }
+        throw e;
+      }
     }),
     connectionStatus: publicProcedure.query(async () => {
       const db = await getDb();
