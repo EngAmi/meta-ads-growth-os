@@ -76,3 +76,13 @@
 - [x] Dashboard: spinning RefreshCw icon while sync is in progress + toast on success/failure
 - [x] Notification: owner alert on sync complete (rows imported, errors, duration) + failure alert
 - [x] Ads Performance: upgraded to context-aware smart header (connected chip + Sync Now + Manage / CTA buttons when not connected)
+
+## Ad Account Picker Feature
+- [x] Backend: add dataSources.fetchAdAccounts mutation (takes accessToken, returns list of ad accounts from Meta API)
+- [x] Frontend: 3-step flow — Step 1: token + settings, Step 2: fetch + pick account, Step 3: save
+- [x] Frontend: "Fetch My Ad Accounts" button calls Meta API and returns all accessible accounts
+- [x] Frontend: scrollable account picker list with radio-button selection
+- [x] Frontend: shows account name, act_ID, business name, currency, status (ACTIVE/DISABLED)
+- [x] Frontend: auto-selects account if only one is found
+- [x] Frontend: green confirmation strip shows selected account before saving
+- [x] Frontend: token change resets the picker so user must re-fetch

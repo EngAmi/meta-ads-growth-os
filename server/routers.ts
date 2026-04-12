@@ -979,6 +979,34 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       await db.delete(importJobs).where(eq(importJobs.id, input.id));
       return { success: true };
     }),
+    fetchAdAccounts: publicProcedure
+      .input(z.object({ accessToken: z.string().min(10) }))
+      .mutation(async ({ input }) => {
+        // Call Meta Graph API to get all ad accounts accessible by this token
+        const url = `https://graph.facebook.com/v19.0/me/adaccounts?fields=id,name,account_id,account_status,currency,timezone_name,business&limit=100&access_token=${encodeURIComponent(input.accessToken)}`;
+        const res = await fetch(url);
+        const json = await res.json() as any;
+        if (json.error) {
+          throw new Error(json.error.message || 'Failed to fetch ad accounts from Meta API');
+        }
+        const accounts = (json.data || []).map((acc: any) => ({
+          id: acc.id,                          // e.g. "act_123456789"
+          accountId: acc.account_id,           // numeric string e.g. "123456789"
+          name: acc.name,
+          status: acc.account_status === 1 ? 'ACTIVE' : acc.account_status === 2 ? 'DISABLED' : 'UNKNOWN',
+          currency: acc.currency || 'USD',
+          timezone: acc.timezone_name || '',
+          businessName: acc.business?.name || null,
+        }));
+        // Also fetch the user's name for display
+        let userName = '';
+        try {
+          const meRes = await fetch(`https://graph.facebook.com/v19.0/me?fields=name&access_token=${encodeURIComponent(input.accessToken)}`);
+          const me = await meRes.json() as any;
+          userName = me.name || '';
+        } catch { /* non-critical */ }
+        return { accounts, userName, total: accounts.length };
+      }),
     syncNow: protectedProcedure.mutation(async () => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");

@@ -76,41 +76,67 @@ function CopyButton({ text }: { text: string }) {
 }
 
 // ─── Meta API Connection Form ─────────────────────────────────────────────────
+type AdAccount = { id: string; accountId: string; name: string; status: string; currency: string; timezone: string; businessName: string | null };
+
 function MetaConnectionForm({ onSaved }: { onSaved: () => void }) {
   const [name, setName] = useState("My Meta Ads Account");
   const [token, setToken] = useState("");
-  const [accountId, setAccountId] = useState("");
   const [syncDays, setSyncDays] = useState("30");
-  const [testResult, setTestResult] = useState<{ success: boolean; accountName?: string | null; error?: string | null } | null>(null);
-  const [testing, setTesting] = useState(false);
+  // Ad account picker state
+  const [adAccounts, setAdAccounts] = useState<AdAccount[]>([]);
+  const [selectedAccount, setSelectedAccount] = useState<AdAccount | null>(null);
+  const [fetchingAccounts, setFetchingAccounts] = useState(false);
+  const [userName, setUserName] = useState("");
+  const [accountsFetched, setAccountsFetched] = useState(false);
+  // Save state
+  const [saving, setSaving] = useState(false);
 
-  const testMutation = trpc.dataSources.testConnection.useMutation();
+  const fetchAccountsMutation = trpc.dataSources.fetchAdAccounts.useMutation();
   const saveMutation = trpc.dataSources.saveConnection.useMutation();
 
-  const handleTest = async () => {
-    if (!token || !accountId) { toast.error("Enter Access Token and Ad Account ID first"); return; }
-    setTesting(true);
-    setTestResult(null);
+  const handleFetchAccounts = async () => {
+    if (!token.trim()) { toast.error("Enter your Access Token first"); return; }
+    setFetchingAccounts(true);
+    setAdAccounts([]);
+    setSelectedAccount(null);
+    setAccountsFetched(false);
     try {
-      const res = await testMutation.mutateAsync({ accessToken: token, adAccountId: accountId });
-      setTestResult(res);
-      if (res.success) toast.success(`Connected to: ${res.accountName}`);
-      else toast.error(res.error || "Connection failed");
-    } finally { setTesting(false); }
+      const res = await fetchAccountsMutation.mutateAsync({ accessToken: token.trim() });
+      setAdAccounts(res.accounts);
+      setUserName(res.userName);
+      setAccountsFetched(true);
+      if (res.accounts.length === 0) {
+        toast.warning("No ad accounts found for this token. Make sure ads_read permission is granted.");
+      } else {
+        toast.success(`Found ${res.total} ad account${res.total !== 1 ? 's' : ''}${res.userName ? ` for ${res.userName}` : ''}`);
+        // Auto-select if only one account
+        if (res.accounts.length === 1) setSelectedAccount(res.accounts[0]);
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Failed to fetch ad accounts");
+    } finally { setFetchingAccounts(false); }
   };
 
   const handleSave = async () => {
-    if (!name || !token || !accountId) { toast.error("Fill in all required fields"); return; }
+    if (!name || !token || !selectedAccount) { toast.error("Select an ad account first"); return; }
+    setSaving(true);
     try {
-      await saveMutation.mutateAsync({ name, accessToken: token, adAccountId: accountId, syncDays: parseInt(syncDays) });
-      toast.success("Connection saved successfully");
-      setToken(""); setAccountId(""); setTestResult(null);
+      await saveMutation.mutateAsync({
+        name,
+        accessToken: token.trim(),
+        adAccountId: selectedAccount.accountId,
+        syncDays: parseInt(syncDays)
+      });
+      toast.success(`Connection saved — ${selectedAccount.name}`);
+      setToken(""); setAdAccounts([]); setSelectedAccount(null); setAccountsFetched(false); setUserName("");
       onSaved();
     } catch (e: any) { toast.error(e.message || "Save failed"); }
+    finally { setSaving(false); }
   };
 
   return (
     <div className="space-y-6">
+      {/* How-to guide */}
       <div className="flex gap-3 p-4 rounded-xl bg-blue-500/5 border border-blue-500/20">
         <Info className="w-5 h-5 text-blue-400 mt-0.5 shrink-0" />
         <div className="text-sm text-slate-300 space-y-1">
@@ -119,65 +145,132 @@ function MetaConnectionForm({ onSaved }: { onSaved: () => void }) {
             <li>Go to <span className="text-blue-400 font-mono">developers.facebook.com</span> → Your App → Tools → Graph API Explorer</li>
             <li>Select your app, click <strong>Generate Access Token</strong>, grant <code>ads_read</code> permission</li>
             <li>For long-lived token: exchange via <code>oauth/access_token</code> endpoint (60-day expiry)</li>
-            <li>Your Ad Account ID is in Meta Ads Manager URL: <code>act_XXXXXXXXXX</code></li>
+            <li>Paste the token below, then click <strong>Fetch My Ad Accounts</strong></li>
           </ol>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        <div className="space-y-2">
-          <Label className="text-slate-300">Connection Name</Label>
-          <Input value={name} onChange={e => setName(e.target.value)} placeholder="My Meta Ads Account"
-            className="bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500" />
+      {/* Step 1: Token + basic settings */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="w-6 h-6 rounded-full bg-violet-600 text-white text-xs font-bold flex items-center justify-center">1</span>
+          <span className="text-sm font-semibold text-slate-200">Enter your Access Token</span>
         </div>
-        <div className="space-y-2">
-          <Label className="text-slate-300">Sync Period (days)</Label>
-          <Select value={syncDays} onValueChange={setSyncDays}>
-            <SelectTrigger className="bg-slate-800/60 border-slate-700 text-white">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-slate-900 border-slate-700">
-              {["7","14","30","60","90"].map(d => (
-                <SelectItem key={d} value={d} className="text-slate-200">{d} days</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2 md:col-span-2">
-          <Label className="text-slate-300">Access Token <span className="text-red-400">*</span></Label>
-          <Input type="password" value={token} onChange={e => setToken(e.target.value)}
-            placeholder="EAAxxxxxxxxxxxxxxx..."
-            className="bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500 font-mono text-sm" />
-        </div>
-        <div className="space-y-2 md:col-span-2">
-          <Label className="text-slate-300">Ad Account ID <span className="text-red-400">*</span></Label>
-          <Input value={accountId} onChange={e => setAccountId(e.target.value)}
-            placeholder="act_1234567890 or 1234567890"
-            className="bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500 font-mono" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className="text-slate-300">Connection Name</Label>
+            <Input value={name} onChange={e => setName(e.target.value)} placeholder="My Meta Ads Account"
+              className="bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500" />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-slate-300">Sync Period (days)</Label>
+            <Select value={syncDays} onValueChange={setSyncDays}>
+              <SelectTrigger className="bg-slate-800/60 border-slate-700 text-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-slate-900 border-slate-700">
+                {["7","14","30","60","90"].map(d => (
+                  <SelectItem key={d} value={d} className="text-slate-200">{d} days</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <Label className="text-slate-300">Access Token <span className="text-red-400">*</span></Label>
+            <div className="flex gap-2">
+              <Input type="password" value={token} onChange={e => { setToken(e.target.value); setAccountsFetched(false); setAdAccounts([]); setSelectedAccount(null); }}
+                placeholder="EAAxxxxxxxxxxxxxxx..."
+                className="bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500 font-mono text-sm flex-1" />
+              <Button onClick={handleFetchAccounts} disabled={fetchingAccounts || !token.trim()}
+                className="bg-blue-600 hover:bg-blue-500 text-white shrink-0 px-4">
+                {fetchingAccounts
+                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Fetching...</>
+                  : <><Plug className="w-4 h-4 mr-2" />Fetch My Ad Accounts</>}
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
 
-      {testResult && (
-        <div className={`flex items-center gap-3 p-3 rounded-lg border ${testResult.success ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-red-500/10 border-red-500/30 text-red-300'}`}>
-          {testResult.success ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
-          <span className="text-sm font-medium">
-            {testResult.success ? `✓ Connected to: ${testResult.accountName}` : `✗ ${testResult.error}`}
-          </span>
+      {/* Step 2: Ad Account Picker — shown after fetch */}
+      {accountsFetched && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="w-6 h-6 rounded-full bg-violet-600 text-white text-xs font-bold flex items-center justify-center">2</span>
+            <span className="text-sm font-semibold text-slate-200">Select Ad Account to connect</span>
+            {userName && <span className="text-xs text-slate-400 ml-1">({userName})</span>}
+          </div>
+
+          {adAccounts.length === 0 ? (
+            <div className="flex items-center gap-3 p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-300">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <span className="text-sm">No ad accounts found. Make sure your token has <code>ads_read</code> permission.</span>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {adAccounts.map(acc => (
+                <button
+                  key={acc.id}
+                  onClick={() => setSelectedAccount(acc)}
+                  className={`w-full flex items-center justify-between p-4 rounded-xl border text-left transition-all ${
+                    selectedAccount?.id === acc.id
+                      ? 'bg-violet-600/15 border-violet-500/60 ring-1 ring-violet-500/40'
+                      : 'bg-slate-800/40 border-slate-700/50 hover:border-slate-600 hover:bg-slate-800/70'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                      selectedAccount?.id === acc.id ? 'border-violet-400 bg-violet-400' : 'border-slate-500'
+                    }`}>
+                      {selectedAccount?.id === acc.id && <div className="w-2 h-2 rounded-full bg-white" />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-white">{acc.name}</p>
+                      <p className="text-xs text-slate-400 font-mono mt-0.5">act_{acc.accountId}
+                        {acc.businessName && <span className="text-slate-500"> · {acc.businessName}</span>}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs text-slate-400">{acc.currency}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                      acc.status === 'ACTIVE'
+                        ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30'
+                        : 'text-red-400 bg-red-400/10 border-red-400/30'
+                    }`}>{acc.status}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {selectedAccount && (
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
+              <CheckCircle2 className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">
+                Selected: <strong>{selectedAccount.name}</strong>
+                <span className="text-emerald-400/70 font-mono ml-2 text-xs">act_{selectedAccount.accountId}</span>
+                <span className="text-emerald-400/60 ml-2 text-xs">{selectedAccount.currency} · {selectedAccount.timezone}</span>
+              </span>
+            </div>
+          )}
         </div>
       )}
 
-      <div className="flex gap-3">
-        <Button variant="outline" onClick={handleTest} disabled={testing}
-          className="border-slate-600 text-slate-300 hover:bg-slate-800">
-          {testing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plug className="w-4 h-4 mr-2" />}
-          Test Connection
-        </Button>
-        <Button onClick={handleSave} disabled={saveMutation.isPending}
-          className="bg-violet-600 hover:bg-violet-500 text-white">
-          {saveMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-          Save Connection
-        </Button>
-      </div>
+      {/* Step 3: Save */}
+      {accountsFetched && adAccounts.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="w-6 h-6 rounded-full bg-violet-600 text-white text-xs font-bold flex items-center justify-center">3</span>
+            <span className="text-sm font-semibold text-slate-200">Save and start syncing</span>
+          </div>
+          <Button onClick={handleSave} disabled={saving || !selectedAccount}
+            className="bg-violet-600 hover:bg-violet-500 text-white w-full sm:w-auto">
+            {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</> : <><CheckCircle2 className="w-4 h-4 mr-2" />Save Connection</>}
+          </Button>
+          {!selectedAccount && <p className="text-xs text-slate-500">Select an ad account above to continue.</p>}
+        </div>
+      )}
     </div>
   );
 }
