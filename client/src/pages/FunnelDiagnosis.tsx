@@ -1,7 +1,9 @@
+import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge, SeverityBadge } from "@/components/ui/StatusBadge";
-import { GitBranch, ArrowRight, AlertTriangle, Globe, TrendingDown, TrendingUp } from "lucide-react";
+import { GitBranch, ArrowRight, AlertTriangle, Globe, TrendingDown, TrendingUp, Link2, Upload, CheckCircle2, RefreshCw, ChevronRight } from "lucide-react";
+import { useLocation } from "wouter";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis } from "recharts";
 
 function fmt(n: any, prefix = "", decimals = 0) {
@@ -20,6 +22,8 @@ const stageConfig = {
 };
 
 export default function FunnelDiagnosis() {
+  const [, setLocation] = useLocation();
+  const { data: connStatus } = trpc.dataSources.connectionStatus.useQuery();
   const { data: overview } = trpc.funnel.overview.useQuery();
   const { data: bottlenecks } = trpc.funnel.bottlenecks.useQuery();
   const { data: countryAnalysis } = trpc.funnel.countryAnalysis.useQuery();
@@ -96,14 +100,55 @@ export default function FunnelDiagnosis() {
         description="End-to-end funnel analysis: Ads → Leads → Sales → Revenue"
         icon={GitBranch}
       >
-        {totalRevenueImpact > 0 && (
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[oklch(0.65_0.22_25/0.12)] border border-[oklch(0.65_0.22_25/0.25)]">
-            <AlertTriangle className="h-3.5 w-3.5 text-[oklch(0.65_0.22_25)]" />
-            <span className="text-xs font-medium text-[oklch(0.65_0.22_25)]">
-              ${totalRevenueImpact.toLocaleString()} revenue at risk
-            </span>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {totalRevenueImpact > 0 && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[oklch(0.65_0.22_25/0.12)] border border-[oklch(0.65_0.22_25/0.25)]">
+              <AlertTriangle className="h-3.5 w-3.5 text-[oklch(0.65_0.22_25)]" />
+              <span className="text-xs font-medium text-[oklch(0.65_0.22_25)]">
+                ${totalRevenueImpact.toLocaleString()} revenue at risk
+              </span>
+            </div>
+          )}
+          {connStatus?.hasActiveConnection ? (
+            <div className="flex items-center gap-1.5 text-xs text-[oklch(0.72_0.16_162)] bg-[oklch(0.72_0.16_162)/10] border border-[oklch(0.72_0.16_162)/25] px-3 py-1.5 rounded-lg">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Meta connected</span>
+              {connStatus.lastSyncedAt && (
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <RefreshCw className="h-3 w-3" />
+                  {(() => {
+                    const diff = Date.now() - new Date(connStatus.lastSyncedAt).getTime();
+                    const mins = Math.floor(diff / 60000);
+                    const hrs = Math.floor(mins / 60);
+                    if (hrs > 0) return `${hrs}h ago`;
+                    if (mins > 0) return `${mins}m ago`;
+                    return "just now";
+                  })()}
+                </span>
+              )}
+              <button onClick={() => setLocation("/data-sources")} className="ml-1 hover:text-foreground transition-colors">
+                <ChevronRight className="h-3 w-3" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={() => setLocation("/data-sources?tab=api")}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[oklch(0.62_0.19_258)] text-white text-xs font-semibold hover:bg-[oklch(0.55_0.19_258)] transition-colors"
+              >
+                <Link2 className="h-3.5 w-3.5" />
+                Connect Meta API
+              </button>
+              <button
+                onClick={() => setLocation("/data-sources?tab=upload")}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card text-foreground text-xs font-semibold hover:bg-muted transition-colors"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Upload CSV
+              </button>
+            </>
+          )}
+        </div>
       </PageHeader>
 
       {/* Funnel Flow Visualization */}

@@ -1,9 +1,11 @@
+import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { Users, ShieldAlert, Clock, Target, Filter } from "lucide-react";
+import { Users, ShieldAlert, Clock, Target, Filter, Link2, Upload, CheckCircle2, RefreshCw, ChevronRight } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
 function fmt(n: any, decimals = 0) {
@@ -26,6 +28,8 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function LeadQuality() {
+  const [, setLocation] = useLocation();
+  const { data: connStatus } = trpc.dataSources.connectionStatus.useQuery();
   const { data: stats } = trpc.leads.stats.useQuery();
   const { data: byCountry } = trpc.leads.byCountry.useQuery();
   const { data: byCampaign } = trpc.leads.byCampaign.useQuery();
@@ -76,7 +80,49 @@ export default function LeadQuality() {
         title="Lead Quality Engine"
         description="Lead scoring, intent classification, fake detection, and response time analysis"
         icon={Users}
-      />
+      >
+        <div className="flex items-center gap-2">
+          {connStatus?.hasActiveConnection ? (
+            <div className="flex items-center gap-1.5 text-xs text-[oklch(0.72_0.16_162)] bg-[oklch(0.72_0.16_162)/10] border border-[oklch(0.72_0.16_162)/25] px-3 py-1.5 rounded-lg">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Meta connected</span>
+              {connStatus.lastSyncedAt && (
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <RefreshCw className="h-3 w-3" />
+                  {(() => {
+                    const diff = Date.now() - new Date(connStatus.lastSyncedAt).getTime();
+                    const mins = Math.floor(diff / 60000);
+                    const hrs = Math.floor(mins / 60);
+                    if (hrs > 0) return `${hrs}h ago`;
+                    if (mins > 0) return `${mins}m ago`;
+                    return "just now";
+                  })()}
+                </span>
+              )}
+              <button onClick={() => setLocation("/data-sources")} className="ml-1 hover:text-foreground transition-colors">
+                <ChevronRight className="h-3 w-3" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={() => setLocation("/data-sources?tab=api")}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[oklch(0.62_0.19_258)] text-white text-xs font-semibold hover:bg-[oklch(0.55_0.19_258)] transition-colors"
+              >
+                <Link2 className="h-3.5 w-3.5" />
+                Connect Meta API
+              </button>
+              <button
+                onClick={() => setLocation("/data-sources?tab=upload")}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card text-foreground text-xs font-semibold hover:bg-muted transition-colors"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Upload CSV
+              </button>
+            </>
+          )}
+        </div>
+      </PageHeader>
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

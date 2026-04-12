@@ -62,3 +62,10 @@
 - [x] Add two quick-action buttons: "Connect Meta API" and "Upload CSV Report"
 - [x] Add same CTA to Ads Performance page header (compact button pair)
 - [x] Buttons navigate to /data-sources with the correct tab pre-selected
+
+## Suggested Improvements (Round 2)
+- [x] Backend: add dataSources.connectionStatus query (returns hasActiveConnection, lastSyncedAt)
+- [x] Dashboard: auto-hide banner when active Meta API connection exists (shows green status strip instead)
+- [x] Dashboard: show "Last synced X ago" chip when connected
+- [x] Lead Quality page: smart header — CTA buttons when not connected, green status chip when connected
+- [x] Funnel Diagnosis page: smart header — CTA buttons when not connected, green status chip when connected

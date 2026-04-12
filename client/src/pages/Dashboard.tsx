@@ -3,7 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge, SeverityBadge } from "@/components/ui/StatusBadge";
-import { LayoutDashboard, DollarSign, Users, Target, TrendingUp, AlertTriangle, Lightbulb, ArrowRight, Zap, Activity, Link2, Upload, ChevronRight } from "lucide-react";
+import { LayoutDashboard, DollarSign, Users, Target, TrendingUp, AlertTriangle, Lightbulb, ArrowRight, Zap, Activity, Link2, Upload, ChevronRight, CheckCircle2, RefreshCw } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from "recharts";
 import { useLocation } from "wouter";
 import { useEffect } from "react";
@@ -23,6 +23,7 @@ export default function Dashboard() {
   const { data: byCountry } = trpc.dashboard.revenueByCountry.useQuery();
   const { data: byAgent } = trpc.dashboard.revenueByAgent.useQuery();
   const { data: insights } = trpc.ads.insights.useQuery({ days: 14 });
+  const { data: connStatus } = trpc.dataSources.connectionStatus.useQuery();
   const [, setLocation] = useLocation();
 
   useEffect(() => {
@@ -88,40 +89,77 @@ export default function Dashboard() {
         </div>
       </PageHeader>
 
-      {/* Meta Ads Data Source CTA Banner */}
-      <div className="rounded-xl border border-[oklch(0.62_0.19_258)/30] bg-gradient-to-r from-[oklch(0.62_0.19_258)/8] to-[oklch(0.68_0.18_305)/8] p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-[oklch(0.62_0.19_258)/20] flex items-center justify-center shrink-0">
-            <Link2 className="h-4 w-4 text-[oklch(0.62_0.19_258)]" />
+      {/* Meta Ads Data Source Banner — shown when not connected, replaced by status chip when connected */}
+      {connStatus?.hasActiveConnection ? (
+        // ── Connected state: subtle status strip ──────────────────────────────
+        <div className="rounded-xl border border-[oklch(0.72_0.16_162)/30] bg-[oklch(0.72_0.16_162)/6] px-4 py-2.5 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="h-4 w-4 text-[oklch(0.72_0.16_162)] shrink-0" />
+            <span className="text-sm font-medium text-foreground">
+              Meta Ads connected
+              {connStatus.connectionName && (
+                <span className="text-muted-foreground font-normal"> · {connStatus.connectionName}</span>
+              )}
+            </span>
+            {connStatus.lastSyncedAt && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <RefreshCw className="h-3 w-3" />
+                Last synced {(() => {
+                  const diff = Date.now() - new Date(connStatus.lastSyncedAt).getTime();
+                  const mins = Math.floor(diff / 60000);
+                  const hrs = Math.floor(mins / 60);
+                  const days = Math.floor(hrs / 24);
+                  if (days > 0) return `${days}d ago`;
+                  if (hrs > 0) return `${hrs}h ago`;
+                  if (mins > 0) return `${mins}m ago`;
+                  return "just now";
+                })()}
+              </span>
+            )}
           </div>
-          <div>
-            <p className="text-sm font-semibold text-foreground">Connect your Meta Ads data</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Link your Meta Ads Manager directly or upload a CSV report to populate real performance data.</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          <button
-            onClick={() => setLocation("/data-sources?tab=api")}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[oklch(0.62_0.19_258)] text-white text-xs font-semibold hover:bg-[oklch(0.55_0.19_258)] transition-colors"
-          >
-            <Link2 className="h-3.5 w-3.5" />
-            Connect Meta API
-          </button>
-          <button
-            onClick={() => setLocation("/data-sources?tab=upload")}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-card text-foreground text-xs font-semibold hover:bg-muted transition-colors"
-          >
-            <Upload className="h-3.5 w-3.5" />
-            Upload CSV Report
-          </button>
           <button
             onClick={() => setLocation("/data-sources")}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
           >
-            View all sources <ChevronRight className="h-3 w-3" />
+            Manage sources <ChevronRight className="h-3 w-3" />
           </button>
         </div>
-      </div>
+      ) : (
+        // ── Not connected state: full CTA banner ─────────────────────────────
+        <div className="rounded-xl border border-[oklch(0.62_0.19_258)/30] bg-gradient-to-r from-[oklch(0.62_0.19_258)/8] to-[oklch(0.68_0.18_305)/8] p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-lg bg-[oklch(0.62_0.19_258)/20] flex items-center justify-center shrink-0">
+              <Link2 className="h-4 w-4 text-[oklch(0.62_0.19_258)]" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Connect your Meta Ads data</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Link your Meta Ads Manager directly or upload a CSV report to populate real performance data.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <button
+              onClick={() => setLocation("/data-sources?tab=api")}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[oklch(0.62_0.19_258)] text-white text-xs font-semibold hover:bg-[oklch(0.55_0.19_258)] transition-colors"
+            >
+              <Link2 className="h-3.5 w-3.5" />
+              Connect Meta API
+            </button>
+            <button
+              onClick={() => setLocation("/data-sources?tab=upload")}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-card text-foreground text-xs font-semibold hover:bg-muted transition-colors"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Upload CSV Report
+            </button>
+            <button
+              onClick={() => setLocation("/data-sources")}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              View all sources <ChevronRight className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* KPI Grid */}
       <h2 className="sr-only">Key Performance Indicators</h2>

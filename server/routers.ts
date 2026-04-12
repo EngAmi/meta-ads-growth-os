@@ -978,6 +978,20 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       await db.delete(importJobs).where(eq(importJobs.id, input.id));
       return { success: true };
     }),
+    connectionStatus: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return { hasActiveConnection: false, lastSyncedAt: null as Date | null, connectionName: null as string | null };
+      const all = await db
+        .select({ id: dataConnections.id, name: dataConnections.name, lastSyncAt: dataConnections.lastSyncAt, status: dataConnections.status })
+        .from(dataConnections)
+        .orderBy(desc(dataConnections.updatedAt));
+      const active = all.find(c => c.status === 'connected' || c.status === 'syncing');
+      return {
+        hasActiveConnection: !!active,
+        lastSyncedAt: active?.lastSyncAt ?? null,
+        connectionName: active?.name ?? null,
+      };
+    }),
   }),
 
   // ─── WhatsApp Webhook Settings ────────────────────────────────────────────
