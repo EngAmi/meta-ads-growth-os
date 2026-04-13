@@ -25,10 +25,18 @@ export default function Dashboard() {
   const { data: byAgent } = trpc.dashboard.revenueByAgent.useQuery();
   const { data: insights } = trpc.ads.insights.useQuery({ days: 14 });
   const { data: connStatus, refetch: refetchConnStatus } = trpc.dataSources.connectionStatus.useQuery();
-  const syncNow = trpc.dataSources.syncNow.useMutation({
+
+  // ── Engine data ───────────────────────────────────────────────────────────
+  const { data: engineBrief, refetch: refetchBrief } = trpc.engineDashboard.brief.useQuery();
+  const { data: engineFunnelHealth } = trpc.engineDashboard.funnelHealth.useQuery();
+  const { data: engineRunStatus, refetch: refetchRunStatus } = trpc.engineDataSources.runStatus.useQuery();
+
+  const syncNow = trpc.engineDataSources.syncNow.useMutation({
     onSuccess: (result) => {
       refetchConnStatus();
-      toast.success(`Sync complete — ${result.imported} rows imported${result.errors > 0 ? `, ${result.errors} errors` : ''}`);
+      refetchBrief();
+      refetchRunStatus();
+      toast.success(`Engine sync complete — ${result.stepsCompleted} steps, status: ${result.status}`);
     },
     onError: (err) => {
       toast.error(`Sync failed: ${err.message}`);
@@ -66,6 +74,41 @@ export default function Dashboard() {
   const convRate = leads?.total && leads.total > 0 ? ((Number(leads.converted) / leads.total) * 100) : 0;
   const fakeRate = leads?.total && leads.total > 0 ? ((Number(leads.fake) / leads.total) * 100) : 0;
 
+  // Engine KPIs — prefer engine brief, fall back to legacy summary
+  const ekpis = (engineBrief as any)?.kpis;
+  const kpiSpend   = ekpis?.spend7d    != null ? ekpis.spend7d    : Number(ads?.totalSpend   || 0);
+  const kpiLeads   = ekpis?.leads7d    != null ? ekpis.leads7d    : Number(ads?.totalLeads   || 0);
+  const kpiCpl     = ekpis?.avgCpl7d   != null ? ekpis.avgCpl7d   : (ads?.totalSpend && ads.totalLeads ? Number(ads.totalSpend) / Number(ads.totalLeads) : 0);
+  const kpiCtr     = ekpis?.avgCtr7d   != null ? ekpis.avgCtr7d   : 0;
+  const kpiImpr    = ekpis?.impressions7d != null ? ekpis.impressions7d : Number(ads?.totalImpressions || 0);
+
+  // Engine funnel health — prefer engine, fall back to legacy
+  const efh = engineFunnelHealth as any;
+  const fhAds   = efh?.ads   ?? null;
+  const fhLeads = efh?.leads ?? null;
+  const fhSales = efh?.sales ?? null;
+
+  // Connection status — prefer engine run status, fall back to legacy
+  const lastSyncedAt: Date | null = (engineRunStatus as any)?.endedAt
+    ? new Date((engineRunStatus as any).endedAt)
+    : connStatus?.lastSyncedAt ? new Date(connStatus.lastSyncedAt) : null;
+  const hasActiveConnection = !!(engineRunStatus || connStatus?.hasActiveConnection);
+
+  // Top issues — prefer engine brief, fall back to legacy bottlenecks
+  const topIssues = (engineBrief as any)?.topIssues?.length
+    ? (engineBrief as any).topIssues
+    : (summary?.topBottlenecks || []).map((b: any) => ({
+        ruleId: b.id,
+        headline: b.title,
+        category: 'funnel',
+        severity: b.severity === 'critical' ? 85 : b.severity === 'warning' ? 55 : 30,
+        entityName: '',
+      }));
+
+  // Action of the day — prefer engine brief, fall back to first legacy recommendation
+  const actionOfDay = (engineBrief as any)?.actionOfTheDay ?? null;
+  const legacyRec = (summary?.topRecommendations || [])[0] ?? null;
+
   const funnelStages = [
     { label: "Ad Spend", value: fmt(ads?.totalSpend, "$"), sub: `${fmt(ads?.totalImpressions)} impressions`, color: "oklch(0.62 0.19 258)" },
     { label: "Leads", value: fmt(ads?.totalLeads), sub: `CPL: $${Number(funnelHealth?.adsToLeads || 0).toFixed(2)}`, color: "oklch(0.68 0.18 305)" },
@@ -99,23 +142,26 @@ export default function Dashboard() {
         </div>
       </PageHeader>
 
-      {/* Meta Ads Data Source Banner — shown when not connected, replaced by status chip when connected */}
-      {connStatus?.hasActiveConnection ? (
+      {/* Meta Ads Data Source Banner — shows engine run status when available */}
+      {hasActiveConnection ? (
         // ── Connected state: subtle status strip ──────────────────────────────
         <div className="rounded-xl border border-[oklch(0.72_0.16_162)/30] bg-[oklch(0.72_0.16_162)/6] px-4 py-2.5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
             <CheckCircle2 className="h-4 w-4 text-[oklch(0.72_0.16_162)] shrink-0" />
             <span className="text-sm font-medium text-foreground">
-              Meta Ads connected
-              {connStatus.connectionName && (
+              {engineRunStatus ? 'Engine pipeline' : 'Meta Ads'} connected
+              {connStatus?.connectionName && !engineRunStatus && (
                 <span className="text-muted-foreground font-normal"> · {connStatus.connectionName}</span>
               )}
+              {engineRunStatus && (
+                <span className="text-muted-foreground font-normal"> · run {String(engineRunStatus.runId).slice(0, 8)}… · {engineRunStatus.stepsCompleted ?? 0}/6 steps</span>
+              )}
             </span>
-            {connStatus.lastSyncedAt && (
+            {lastSyncedAt && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <RefreshCw className="h-3 w-3" />
                 Last synced {(() => {
-                  const diff = Date.now() - new Date(connStatus.lastSyncedAt).getTime();
+                  const diff = Date.now() - lastSyncedAt.getTime();
                   const mins = Math.floor(diff / 60000);
                   const hrs = Math.floor(mins / 60);
                   const days = Math.floor(hrs / 24);
@@ -181,44 +227,40 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* KPI Grid */}
+      {/* KPI Grid — engine data preferred, legacy fallback */}
       <h2 className="sr-only">Key Performance Indicators</h2>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
-          title="Total Revenue"
-          value={fmt(ads?.totalRevenue, "$")}
-          subtitle="Last 30 days"
+          title="Ad Spend (7d)"
+          value={fmt(kpiSpend, "$")}
+          subtitle={`${fmt(kpiImpr)} impressions`}
           icon={DollarSign}
-          status={roas >= 3 ? "green" : roas >= 1.5 ? "yellow" : "red"}
-          trend={8.4}
-          trendLabel="vs prev period"
+          status={kpiSpend > 0 ? "green" : "yellow"}
+          trendLabel="last 7 days"
         />
         <MetricCard
-          title="ROAS"
-          value={`${roas.toFixed(2)}x`}
-          subtitle={`$${fmt(ads?.totalSpend)} spent`}
+          title="Avg CPL (7d)"
+          value={kpiCpl > 0 ? `$${kpiCpl.toFixed(2)}` : '—'}
+          subtitle={`${fmt(kpiLeads)} leads`}
           icon={TrendingUp}
-          status={roas >= 3 ? "green" : roas >= 1.5 ? "yellow" : "red"}
-          trend={roas >= 3 ? 5.2 : -3.1}
-          trendLabel="vs prev period"
+          status={kpiCpl > 0 && kpiCpl < 20 ? "green" : kpiCpl < 40 ? "yellow" : "red"}
+          trendLabel="last 7 days"
         />
         <MetricCard
-          title="Total Leads"
-          value={fmt(leads?.total)}
+          title="Total Leads (7d)"
+          value={fmt(kpiLeads)}
           subtitle={`${fakeRate.toFixed(1)}% fake rate`}
           icon={Users}
           status={fakeRate < 5 ? "green" : fakeRate < 10 ? "yellow" : "red"}
-          trend={12.1}
-          trendLabel="vs prev period"
+          trendLabel="last 7 days"
         />
         <MetricCard
-          title="Conversion Rate"
-          value={`${convRate.toFixed(1)}%`}
+          title="Avg CTR (7d)"
+          value={kpiCtr > 0 ? `${kpiCtr.toFixed(2)}%` : '—'}
           subtitle={`${fmt(leads?.converted)} converted`}
           icon={Target}
-          status={convRate >= 15 ? "green" : convRate >= 8 ? "yellow" : "red"}
-          trend={-2.3}
-          trendLabel="vs prev period"
+          status={kpiCtr >= 1 ? "green" : kpiCtr >= 0.5 ? "yellow" : "red"}
+          trendLabel="last 7 days"
         />
       </div>
 
@@ -306,52 +348,79 @@ export default function Dashboard() {
 
       {/* Bottom Row: Bottlenecks + Recommendations + Agents */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Top Bottlenecks */}
+        {/* Top Issues — engine brief preferred, legacy fallback */}
         <div className="rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-[oklch(0.65_0.22_25)]" />
               Critical Funnel Issues
             </h2>
-            <button onClick={() => setLocation("/funnel")} className="text-xs text-primary hover:underline">View all</button>
+            <button onClick={() => setLocation("/funnel-diagnosis")} className="text-xs text-primary hover:underline">View all</button>
           </div>
           <div className="space-y-3">
-            {(summary?.topBottlenecks || []).map((b: any) => (
-              <div key={b.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border/50">
-                <SeverityBadge severity={b.severity} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-foreground truncate">{b.title}</p>
-                  {b.revenueImpact && (
-                    <p className="text-xs text-muted-foreground mt-0.5">Impact: ${Number(b.revenueImpact).toLocaleString()}</p>
-                  )}
+            {topIssues.slice(0, 3).map((b: any, i: number) => {
+              const sev = b.severity >= 80 ? 'critical' : b.severity >= 50 ? 'warning' : 'info';
+              return (
+                <div key={b.ruleId ?? i} className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border/50">
+                  <SeverityBadge severity={sev} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-foreground truncate">{b.headline ?? b.title}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {b.category && <span className="text-xs text-muted-foreground capitalize">{b.category}</span>}
+                      {b.entityName && <span className="text-xs text-muted-foreground truncate">· {b.entityName}</span>}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
+            {topIssues.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-4">No active issues — run a sync to check your funnel.</p>
+            )}
           </div>
         </div>
 
-        {/* Top Recommendations */}
+        {/* Action of the Day — engine brief preferred, legacy fallback */}
         <div className="rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Lightbulb className="h-4 w-4 text-[oklch(0.82_0.17_85)]" />
-              Top AI-Recommended Actions
+              Action of the Day
             </h2>
             <button onClick={() => setLocation("/recommendations")} className="text-xs text-primary hover:underline">View all</button>
           </div>
-          <div className="space-y-3">
-            {(summary?.topRecommendations || []).map((r: any, i: number) => (
-              <div key={r.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border/50">
-                <div className="h-5 w-5 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary shrink-0 mt-0.5">{i + 1}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-foreground truncate">{r.title}</p>
-                  {r.estimatedImpact && (
-                    <p className="text-xs text-[oklch(0.72_0.16_162)] mt-0.5">+${Number(r.estimatedImpact).toLocaleString()} potential</p>
-                  )}
-                </div>
+          {actionOfDay ? (
+            <div className="p-3 rounded-lg bg-muted/30 border border-border/50 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-primary/20 text-primary uppercase tracking-wide">{actionOfDay.action}</span>
+                {actionOfDay.entityName && <span className="text-xs text-muted-foreground truncate">{actionOfDay.entityName}</span>}
               </div>
-            ))}
-          </div>
+              <p className="text-xs font-medium text-foreground">{actionOfDay.reason}</p>
+              {actionOfDay.expectedImpact && (
+                <p className="text-xs text-[oklch(0.72_0.16_162)]">Expected: {actionOfDay.expectedImpact}</p>
+              )}
+            </div>
+          ) : legacyRec ? (
+            <div className="p-3 rounded-lg bg-muted/30 border border-border/50">
+              <p className="text-xs font-medium text-foreground truncate">{legacyRec.title}</p>
+              {legacyRec.estimatedImpact && (
+                <p className="text-xs text-[oklch(0.72_0.16_162)] mt-0.5">+${Number(legacyRec.estimatedImpact).toLocaleString()} potential</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground text-center py-4">No recommendation yet — run a sync to generate actions.</p>
+          )}
+
+          {/* Funnel Health badges */}
+          {(fhAds || fhLeads || fhSales) && (
+            <div className="mt-4 pt-4 border-t border-border/50">
+              <p className="text-xs text-muted-foreground mb-2 font-medium">Funnel Health</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                {fhAds   && <StatusBadge status={fhAds}   label={`Ads: ${fhAds}`} />}
+                {fhLeads && <StatusBadge status={fhLeads} label={`Leads: ${fhLeads}`} />}
+                {fhSales && <StatusBadge status={fhSales} label={`Sales: ${fhSales}`} />}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Agent Leaderboard */}
