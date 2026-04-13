@@ -6,6 +6,24 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
 
+// ── Rule-to-category lookup for engine recommendations ─────────────────────────
+const RULE_CATEGORY: Record<string, keyof typeof categoryConfig> = {
+  C1: "ads",
+  C2: "ads",
+  F1: "funnel",
+  F2: "funnel",
+  A1: "ads",
+  S1: "funnel",
+};
+
+// Derive a legacy-compatible priority label from a numeric priorityScore
+function scoreToPriority(score: number): string {
+  if (score >= 8000) return "critical";
+  if (score >= 3000) return "high";
+  if (score >= 1000) return "medium";
+  return "low";
+}
+
 const categoryConfig = {
   ads: { label: "Ads", color: "oklch(0.62 0.19 258)", bg: "oklch(0.62 0.19 258 / 0.1)", icon: "📢" },
   leads: { label: "Leads", color: "oklch(0.68 0.18 305)", bg: "oklch(0.68 0.18 305 / 0.1)", icon: "👥" },
@@ -26,7 +44,50 @@ export default function Recommendations() {
   const [filter, setFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
-  const filtered = (recs || [])
+  // ── Engine recommendations ─────────────────────────────────────────────────
+  const utils = trpc.useUtils();
+  const { data: engineRecsResult } = trpc.engineRecommendations.list.useQuery({ status: "pending" });
+  const engineRecs: any[] = (engineRecsResult as any)?.data ?? [];
+  const useEngineData = engineRecs.length > 0;
+
+  const acceptRec = trpc.engineRecommendations.accept.useMutation({
+    onSuccess: () => {
+      utils.engineRecommendations.list.invalidate();
+      toast.success("Recommendation accepted");
+    },
+    onError: () => toast.error("Failed to accept recommendation"),
+  });
+  const dismissRec = trpc.engineRecommendations.dismiss.useMutation({
+    onSuccess: () => {
+      utils.engineRecommendations.list.invalidate();
+      toast.success("Recommendation dismissed");
+    },
+    onError: () => toast.error("Failed to dismiss recommendation"),
+  });
+
+  // Normalise engine recs into the legacy card shape
+  const normalizedEngineRecs: any[] = useEngineData
+    ? engineRecs.map((r: any) => ({
+        id: r.id,
+        _isEngine: true,
+        title: r.action,
+        problem: r.reason,
+        reason: r.reason,
+        action: r.action,
+        category: RULE_CATEGORY[r.ruleId] ?? "funnel",
+        priority: scoreToPriority(Number(r.priorityScore ?? 0)),
+        estimatedImpact: r.expectedImpact ?? null,
+        status: "pending",
+        confidenceScore: r.confidenceScore,
+        ruleId: r.ruleId,
+        entityName: r.entityName ?? null,
+      }))
+    : [];
+
+  // Merge: engine takes precedence when available, legacy fills in otherwise
+  const mergedRecs = useEngineData ? normalizedEngineRecs : (recs || []);
+
+  const filtered = mergedRecs
     .filter((r: any) => filter === "all" || r.status === filter)
     .filter((r: any) => categoryFilter === "all" || r.category === categoryFilter)
     .sort((a: any, b: any) => {
@@ -36,11 +97,11 @@ export default function Recommendations() {
       return Number(b.estimatedImpact || 0) - Number(a.estimatedImpact || 0);
     });
 
-  const totalImpact = (recs || [])
+  const totalImpact = mergedRecs
     .filter((r: any) => r.status === "pending")
     .reduce((s: number, r: any) => s + Number(r.estimatedImpact || 0), 0);
 
-  const criticalCount = (recs || []).filter((r: any) => r.priority === "critical" && r.status === "pending").length;
+  const criticalCount = mergedRecs.filter((r: any) => r.priority === "critical" && r.status === "pending").length;
 
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
@@ -185,7 +246,36 @@ export default function Recommendations() {
                       </p>
                     </div>
                   )}
-                  {isAuthenticated && !isCompleted && !isDismissed && (
+                  {r._isEngine && r.confidenceScore != null && (
+                    <div className="text-right">
+                      <p className="text-xs text-muted-foreground">Confidence</p>
+                      <p className="text-sm font-semibold text-foreground">{(Number(r.confidenceScore) * 100).toFixed(0)}%</p>
+                    </div>
+                  )}
+                  {r._isEngine && r.entityName && (
+                    <p className="text-xs text-muted-foreground text-right max-w-[120px] truncate">{r.entityName}</p>
+                  )}
+                  {/* Engine recommendation buttons */}
+                  {r._isEngine && isAuthenticated && !isCompleted && !isDismissed && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => acceptRec.mutate({ recommendationId: r.id })}
+                        disabled={acceptRec.isPending}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-[oklch(0.72_0.16_162/0.15)] text-[oklch(0.72_0.16_162)] hover:bg-[oklch(0.72_0.16_162/0.25)] transition-colors border border-[oklch(0.72_0.16_162/0.2)] disabled:opacity-40"
+                      >
+                        <CheckCircle className="h-3 w-3" /> Accept
+                      </button>
+                      <button
+                        onClick={() => dismissRec.mutate({ recommendationId: r.id })}
+                        disabled={dismissRec.isPending}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-muted/50 text-muted-foreground hover:text-foreground transition-colors border border-border disabled:opacity-40"
+                      >
+                        <XCircle className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
+                  {/* Legacy recommendation buttons */}
+                  {!r._isEngine && isAuthenticated && !isCompleted && !isDismissed && (
                     <div className="flex gap-2">
                       {r.status === "pending" && (
                         <button
