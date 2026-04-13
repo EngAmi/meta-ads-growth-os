@@ -2,7 +2,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge, SeverityBadge } from "@/components/ui/StatusBadge";
-import { GitBranch, ArrowRight, AlertTriangle, Globe, TrendingDown, TrendingUp, Link2, Upload, CheckCircle2, RefreshCw, ChevronRight } from "lucide-react";
+import { GitBranch, ArrowRight, AlertTriangle, Globe, TrendingDown, TrendingUp, Link2, Upload, CheckCircle2, RefreshCw, ChevronRight, X } from "lucide-react";
 import { useLocation } from "wouter";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis } from "recharts";
 
@@ -21,12 +21,115 @@ const stageConfig = {
   funnel: { label: "Funnel", color: "oklch(0.65 0.22 25)", icon: "🔻" },
 };
 
+// ── Engine diagnostic card ─────────────────────────────────────────────────────
+function EngineDiagCard({
+  d,
+  borderColor,
+  accentColor,
+  onAcknowledge,
+  isPending,
+}: {
+  d: any;
+  borderColor: string;
+  accentColor: string;
+  onAcknowledge: (id: number) => void;
+  isPending: boolean;
+}) {
+  const ev = d.evidence as any;
+  const stage = d.category as keyof typeof stageConfig;
+  const stageIcon = stageConfig[stage]?.icon ?? "🔍";
+  const hasEvidence = ev?.metric && ev?.currentValue != null;
+  return (
+    <div
+      className="rounded-lg bg-background/50 p-3"
+      style={{ border: `1px solid ${borderColor}33` }}
+    >
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <p className="text-xs font-semibold text-foreground leading-snug">{d.headline}</p>
+        <span className="text-xs text-muted-foreground shrink-0">{stageIcon}</span>
+      </div>
+      {d.entityName && (
+        <p className="text-xs text-muted-foreground mb-1 truncate">{d.entityName}</p>
+      )}
+      {hasEvidence && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>
+            Current:{" "}
+            <span className="font-mono" style={{ color: accentColor }}>
+              {typeof ev.currentValue === "number" ? ev.currentValue.toFixed(2) : ev.currentValue}
+            </span>
+          </span>
+          {ev.baselineMean != null && (
+            <>
+              <span>·</span>
+              <span>
+                Baseline:{" "}
+                <span className="font-mono text-[oklch(0.72_0.16_162)]">
+                  {typeof ev.baselineMean === "number" ? ev.baselineMean.toFixed(2) : ev.baselineMean}
+                </span>
+              </span>
+            </>
+          )}
+          {ev.deltaPercent != null && (
+            <>
+              <span>·</span>
+              <span className="font-mono" style={{ color: accentColor }}>
+                {ev.deltaPercent > 0 ? "+" : ""}{ev.deltaPercent.toFixed(1)}%
+              </span>
+            </>
+          )}
+        </div>
+      )}
+      <div className="mt-2 flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">
+          Rule <span className="font-mono">{d.ruleId}</span>
+          {ev?.baselineSource && ev.baselineSource !== "none" && (
+            <span className="ml-1 opacity-60">· {ev.baselineSource} baseline</span>
+          )}
+        </span>
+        <button
+          onClick={() => onAcknowledge(d.id)}
+          disabled={isPending}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+          title="Acknowledge"
+        >
+          <X className="h-3 w-3" />
+          Ack
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function FunnelDiagnosis() {
   const [, setLocation] = useLocation();
   const { data: connStatus } = trpc.dataSources.connectionStatus.useQuery();
   const { data: overview } = trpc.funnel.overview.useQuery();
   const { data: bottlenecks } = trpc.funnel.bottlenecks.useQuery();
   const { data: countryAnalysis } = trpc.funnel.countryAnalysis.useQuery();
+
+  // ── Engine diagnostics ─────────────────────────────────────────────────────
+  const utils = trpc.useUtils();
+  const { data: engineDiagnosticsResult } = trpc.engineDiagnostics.list.useQuery({ status: 'active', limit: 20 });
+  const acknowledge = trpc.engineDiagnostics.acknowledge.useMutation({
+    onSuccess: () => utils.engineDiagnostics.list.invalidate(),
+  });
+  const engineDiagnostics = engineDiagnosticsResult?.data ?? [];
+  const useEngineData = engineDiagnostics.length > 0;
+
+  // Normalise engine diagnostics into the card shape
+  const engineItems: any[] = useEngineData
+    ? engineDiagnostics.map((d: any) => ({
+        id: d.id,
+        ruleId: d.ruleId,
+        headline: d.headline ?? d.ruleId,
+        category: d.category,
+        severity: d.severity,
+        entityName: d.entityName ?? null,
+        evidence: d.evidence ?? {},
+        tier: d.severity >= 80 ? 'critical' : d.severity >= 50 ? 'warning' : 'info',
+      }))
+    : [];
 
   const ads = overview?.adsMetrics as any;
   const leads = overview?.leadsMetrics as any;
@@ -87,9 +190,16 @@ export default function FunnelDiagnosis() {
     status: c.status,
   }));
 
-  const criticalBottlenecks = (bottlenecks || []).filter((b: any) => b.severity === "critical");
-  const warningBottlenecks = (bottlenecks || []).filter((b: any) => b.severity === "warning");
-  const infoBottlenecks = (bottlenecks || []).filter((b: any) => b.severity === "info");
+  // Prefer engine data; fall back to legacy bottlenecks
+  const criticalBottlenecks = useEngineData
+    ? engineItems.filter(d => d.tier === 'critical')
+    : (bottlenecks || []).filter((b: any) => b.severity === "critical");
+  const warningBottlenecks = useEngineData
+    ? engineItems.filter(d => d.tier === 'warning')
+    : (bottlenecks || []).filter((b: any) => b.severity === "warning");
+  const infoBottlenecks = useEngineData
+    ? engineItems.filter(d => d.tier === 'info')
+    : (bottlenecks || []).filter((b: any) => b.severity === "info");
 
   const totalRevenueImpact = (bottlenecks || []).reduce((s: number, b: any) => s + Number(b.revenueImpact || 0), 0);
 
@@ -190,30 +300,41 @@ export default function FunnelDiagnosis() {
             <h2 className="text-sm font-semibold text-[oklch(0.65_0.22_25)]">Critical Issues ({criticalBottlenecks.length})</h2>
           </div>
           <div className="space-y-3">
-            {criticalBottlenecks.map((b: any) => (
-              <div key={b.id} className="rounded-lg border border-[oklch(0.65_0.22_25/0.2)] bg-background/50 p-3">
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <p className="text-xs font-semibold text-foreground">{b.title}</p>
-                  <span className="text-xs text-muted-foreground shrink-0">{stageConfig[b.stage as keyof typeof stageConfig]?.icon}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mb-2 line-clamp-2">{b.description}</p>
-                <div className="flex items-center justify-between">
-                  {b.revenueImpact && (
-                    <span className="text-xs font-medium text-[oklch(0.65_0.22_25)]">
-                      ${Number(b.revenueImpact).toLocaleString()} at risk
-                    </span>
-                  )}
-                  {b.country && <StatusBadge status="gray" label={b.country} />}
-                </div>
-                {b.currentValue && b.benchmarkValue && (
-                  <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>Current: <span className="text-[oklch(0.65_0.22_25)] font-mono">{Number(b.currentValue).toFixed(2)}</span></span>
-                    <span>·</span>
-                    <span>Benchmark: <span className="text-[oklch(0.72_0.16_162)] font-mono">{Number(b.benchmarkValue).toFixed(2)}</span></span>
+            {criticalBottlenecks.map((b: any) =>
+              useEngineData ? (
+                <EngineDiagCard
+                  key={b.id}
+                  d={b}
+                  borderColor="oklch(0.65 0.22 25)"
+                  accentColor="oklch(0.65 0.22 25)"
+                  onAcknowledge={id => acknowledge.mutate({ diagnosticId: id })}
+                  isPending={acknowledge.isPending}
+                />
+              ) : (
+                <div key={b.id} className="rounded-lg border border-[oklch(0.65_0.22_25/0.2)] bg-background/50 p-3">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <p className="text-xs font-semibold text-foreground">{b.title}</p>
+                    <span className="text-xs text-muted-foreground shrink-0">{stageConfig[b.stage as keyof typeof stageConfig]?.icon}</span>
                   </div>
-                )}
-              </div>
-            ))}
+                  <p className="text-xs text-muted-foreground mb-2 line-clamp-2">{b.description}</p>
+                  <div className="flex items-center justify-between">
+                    {b.revenueImpact && (
+                      <span className="text-xs font-medium text-[oklch(0.65_0.22_25)]">
+                        ${Number(b.revenueImpact).toLocaleString()} at risk
+                      </span>
+                    )}
+                    {b.country && <StatusBadge status="gray" label={b.country} />}
+                  </div>
+                  {b.currentValue && b.benchmarkValue && (
+                    <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>Current: <span className="text-[oklch(0.65_0.22_25)] font-mono">{Number(b.currentValue).toFixed(2)}</span></span>
+                      <span>·</span>
+                      <span>Benchmark: <span className="text-[oklch(0.72_0.16_162)] font-mono">{Number(b.benchmarkValue).toFixed(2)}</span></span>
+                    </div>
+                  )}
+                </div>
+              )
+            )}
             {criticalBottlenecks.length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-4">No critical issues</p>
             )}
@@ -227,23 +348,37 @@ export default function FunnelDiagnosis() {
             <h2 className="text-sm font-semibold text-[oklch(0.82_0.17_85)]">Warnings ({warningBottlenecks.length})</h2>
           </div>
           <div className="space-y-3">
-            {warningBottlenecks.map((b: any) => (
-              <div key={b.id} className="rounded-lg border border-[oklch(0.82_0.17_85/0.2)] bg-background/50 p-3">
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <p className="text-xs font-semibold text-foreground">{b.title}</p>
-                  <span className="text-xs text-muted-foreground shrink-0">{stageConfig[b.stage as keyof typeof stageConfig]?.icon}</span>
+            {warningBottlenecks.map((b: any) =>
+              useEngineData ? (
+                <EngineDiagCard
+                  key={b.id}
+                  d={b}
+                  borderColor="oklch(0.82 0.17 85)"
+                  accentColor="oklch(0.82 0.17 85)"
+                  onAcknowledge={id => acknowledge.mutate({ diagnosticId: id })}
+                  isPending={acknowledge.isPending}
+                />
+              ) : (
+                <div key={b.id} className="rounded-lg border border-[oklch(0.82_0.17_85/0.2)] bg-background/50 p-3">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <p className="text-xs font-semibold text-foreground">{b.title}</p>
+                    <span className="text-xs text-muted-foreground shrink-0">{stageConfig[b.stage as keyof typeof stageConfig]?.icon}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2 line-clamp-2">{b.description}</p>
+                  <div className="flex items-center justify-between">
+                    {b.revenueImpact && (
+                      <span className="text-xs font-medium text-[oklch(0.82_0.17_85)]">
+                        ${Number(b.revenueImpact).toLocaleString()} at risk
+                      </span>
+                    )}
+                    {b.country && <StatusBadge status="gray" label={b.country} />}
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground mb-2 line-clamp-2">{b.description}</p>
-                <div className="flex items-center justify-between">
-                  {b.revenueImpact && (
-                    <span className="text-xs font-medium text-[oklch(0.82_0.17_85)]">
-                      ${Number(b.revenueImpact).toLocaleString()} at risk
-                    </span>
-                  )}
-                  {b.country && <StatusBadge status="gray" label={b.country} />}
-                </div>
-              </div>
-            ))}
+              )
+            )}
+            {warningBottlenecks.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-4">No warnings</p>
+            )}
           </div>
         </div>
 
@@ -254,16 +389,30 @@ export default function FunnelDiagnosis() {
             <h2 className="text-sm font-semibold text-[oklch(0.62_0.19_258)]">Opportunities ({infoBottlenecks.length})</h2>
           </div>
           <div className="space-y-3">
-            {infoBottlenecks.map((b: any) => (
-              <div key={b.id} className="rounded-lg border border-[oklch(0.62_0.19_258/0.2)] bg-background/50 p-3">
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <p className="text-xs font-semibold text-foreground">{b.title}</p>
-                  <span className="text-xs text-muted-foreground shrink-0">{stageConfig[b.stage as keyof typeof stageConfig]?.icon}</span>
+            {infoBottlenecks.map((b: any) =>
+              useEngineData ? (
+                <EngineDiagCard
+                  key={b.id}
+                  d={b}
+                  borderColor="oklch(0.62 0.19 258)"
+                  accentColor="oklch(0.62 0.19 258)"
+                  onAcknowledge={id => acknowledge.mutate({ diagnosticId: id })}
+                  isPending={acknowledge.isPending}
+                />
+              ) : (
+                <div key={b.id} className="rounded-lg border border-[oklch(0.62_0.19_258/0.2)] bg-background/50 p-3">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <p className="text-xs font-semibold text-foreground">{b.title}</p>
+                    <span className="text-xs text-muted-foreground shrink-0">{stageConfig[b.stage as keyof typeof stageConfig]?.icon}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2 line-clamp-2">{b.description}</p>
+                  {b.country && <StatusBadge status="gray" label={b.country} />}
                 </div>
-                <p className="text-xs text-muted-foreground mb-2 line-clamp-2">{b.description}</p>
-                {b.country && <StatusBadge status="gray" label={b.country} />}
-              </div>
-            ))}
+              )
+            )}
+            {infoBottlenecks.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-4">No opportunities found</p>
+            )}
           </div>
         </div>
       </div>
