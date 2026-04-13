@@ -275,6 +275,117 @@ function MetaConnectionForm({ onSaved }: { onSaved: () => void }) {
   );
 }
 
+// ─── Engine Integration Status Badge ────────────────────────────────────────
+function EngineStatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+    active:  { label: "Active",   color: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30", icon: <CheckCircle2 className="w-3 h-3" /> },
+    expired: { label: "Expired",  color: "text-red-400 bg-red-400/10 border-red-400/30",           icon: <XCircle className="w-3 h-3" /> },
+    error:   { label: "Error",    color: "text-red-400 bg-red-400/10 border-red-400/30",           icon: <AlertCircle className="w-3 h-3" /> },
+    syncing: { label: "Syncing…", color: "text-blue-400 bg-blue-400/10 border-blue-400/30",        icon: <Loader2 className="w-3 h-3 animate-spin" /> },
+  };
+  const s = map[status] || { label: status, color: "text-slate-400 bg-slate-400/10 border-slate-400/30", icon: <Info className="w-3 h-3" /> };
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${s.color}`}>
+      {s.icon}{s.label}
+    </span>
+  );
+}
+
+function PipelineRunStatusBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    completed: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30",
+    partial:   "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
+    failed:    "text-red-400 bg-red-400/10 border-red-400/30",
+    running:   "text-blue-400 bg-blue-400/10 border-blue-400/30",
+  };
+  return (
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border capitalize ${map[status] || "text-slate-400 bg-slate-400/10 border-slate-400/30"}`}>
+      {status}
+    </span>
+  );
+}
+
+// ─── Engine Integrations Panel ────────────────────────────────────────────────
+function EngineIntegrationsPanel() {
+  const { data: integrations = [], refetch: refetchIntegrations } = trpc.engineDataSources.list.useQuery();
+  const { data: latestRun, refetch: refetchRun } = trpc.engineDataSources.runStatus.useQuery();
+
+  const engineSync = trpc.engineDataSources.syncNow.useMutation({
+    onSuccess: (result) => {
+      refetchIntegrations();
+      refetchRun();
+      toast.success(`Engine sync complete — ${result.stepsCompleted} steps, status: ${result.status}`);
+    },
+    onError: (err) => toast.error(`Engine sync failed: ${err.message}`),
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Integrations list */}
+      {integrations.length === 0 ? (
+        <div className="text-center py-8 text-slate-500">
+          <Plug className="w-10 h-10 mx-auto mb-2 opacity-30" />
+          <p className="text-sm">No engine integrations yet. Save a connection above to create one.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {integrations.map((intg: any) => (
+            <div key={intg.id} className="flex items-center justify-between p-4 rounded-xl bg-slate-800/40 border border-slate-700/50 hover:border-slate-600/50 transition-colors">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
+                  <svg viewBox="0 0 24 24" className="w-5 h-5 fill-blue-400">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-medium text-white capitalize">{intg.provider?.replace('_', ' ')} · <span className="font-mono text-slate-300">act_{String(intg.adAccountId || '').replace('act_', '')}</span></p>
+                  {intg.lastSyncAt ? (
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Last sync: {new Date(intg.lastSyncAt).toLocaleString()} · {intg.lastSyncRows ?? 0} rows
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-500 mt-0.5">Never synced</p>
+                  )}
+                  {intg.status === 'expired' && (
+                    <p className="text-xs text-red-400 mt-0.5">Token expired — reconnect to resume syncing</p>
+                  )}
+                </div>
+              </div>
+              <EngineStatusBadge status={intg.status} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Sync Now button */}
+      <div className="flex items-center justify-between pt-2">
+        <Button
+          onClick={() => engineSync.mutate()}
+          disabled={engineSync.isPending}
+          className="bg-violet-600 hover:bg-violet-500 text-white gap-2"
+        >
+          {engineSync.isPending
+            ? <><Loader2 className="w-4 h-4 animate-spin" />Running pipeline…</>
+            : <><RefreshCw className="w-4 h-4" />Sync Now</>}
+        </Button>
+
+        {/* Last Pipeline Run status */}
+        {latestRun && (
+          <div className="flex items-center gap-3 text-xs text-slate-400">
+            <Clock className="w-3.5 h-3.5" />
+            <span className="font-mono">{String(latestRun.runId).slice(0, 8)}…</span>
+            <PipelineRunStatusBadge status={latestRun.status} />
+            <span>{latestRun.stepsCompleted ?? 0}/6 steps</span>
+            {latestRun.durationMs != null && (
+              <span>{(Number(latestRun.durationMs) / 1000).toFixed(1)}s</span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Saved Connections List ───────────────────────────────────────────────────
 function ConnectionsList() {
   const { data: connections = [], refetch } = trpc.dataSources.listConnections.useQuery();
@@ -769,6 +880,20 @@ export default function DataSources() {
               </CardHeader>
               <CardContent>
                 <MetaConnectionForm onSaved={refetch} />
+              </CardContent>
+            </Card>
+            <Card className="bg-slate-900/50 border-slate-700/50">
+              <CardHeader>
+                <CardTitle className="text-white text-base flex items-center gap-2">
+                  <Wifi className="w-4 h-4 text-violet-400" />
+                  Engine Integrations
+                </CardTitle>
+                <CardDescription className="text-slate-400">
+                  Active integrations used by the analytics pipeline. Use Sync Now to run a full pipeline cycle.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <EngineIntegrationsPanel />
               </CardContent>
             </Card>
             <Card className="bg-slate-900/50 border-slate-700/50">
