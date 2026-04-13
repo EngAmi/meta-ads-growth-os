@@ -21,26 +21,44 @@ function fmt(n: any, prefix = "", decimals = 0) {
 
 const CHART_COLORS = ["oklch(0.62 0.19 258)", "oklch(0.72 0.16 162)", "oklch(0.82 0.17 85)", "oklch(0.65 0.22 25)", "oklch(0.68 0.18 305)", "oklch(0.75 0.15 200)"];
 
-type SortKey = "spend" | "leads" | "conversions" | "revenue" | "avgCtr" | "avgCpl";
+type SortKey = "spend" | "leads" | "conversions" | "revenue" | "avgCtr" | "avgCpl" | "spend7d" | "leads7d" | "avgCtr7d" | "avgCpl7d";
 
 export default function AdsPerformance() {
   const [, setLocation] = useLocation();
   const { data: connStatus, refetch: refetchConnStatus } = trpc.dataSources.connectionStatus.useQuery();
-  const syncNow = trpc.dataSources.syncNow.useMutation({
-    onSuccess: (result: { imported: number; errors: number; duration: number }) => {
+
+  // ── Legacy queries (fallback) ──────────────────────────────────────────────────
+  const { data: legacyCampaigns, isLoading } = trpc.ads.campaigns.useQuery();
+  const { data: insights } = trpc.ads.insights.useQuery({ days: 30 });
+  const { data: byCountry } = trpc.ads.byCountry.useQuery();
+  const { data: legacyAdSets } = trpc.ads.adSets.useQuery();
+
+  // ── Engine queries (primary) ────────────────────────────────────────────────
+  const { data: engineCampaigns, refetch: refetchEngineCampaigns } = trpc.engineAds.campaigns.useQuery();
+  const { data: engineAdSets, refetch: refetchEngineAdSets } = trpc.engineAds.adSets.useQuery();
+  const { data: engineRunStatus, refetch: refetchRunStatus } = trpc.engineDataSources.runStatus.useQuery();
+
+  // Prefer engine data when non-empty
+  const useEngineData = !!(engineCampaigns as any)?.length;
+  const campaigns = useEngineData ? (engineCampaigns as any[]) : (legacyCampaigns || []);
+  const adSets = useEngineData ? (engineAdSets as any[] || []) : (legacyAdSets || []);
+
+  // Engine sync replaces legacy sync
+  const syncNow = trpc.engineDataSources.syncNow.useMutation({
+    onSuccess: (result) => {
       refetchConnStatus();
-      toast.success(`Sync complete — ${result.imported} rows imported${result.errors > 0 ? `, ${result.errors} errors` : ''}`);
+      refetchEngineCampaigns();
+      refetchEngineAdSets();
+      refetchRunStatus();
+      toast.success(`Engine sync complete — ${result.stepsCompleted} steps, status: ${result.status}`);
     },
     onError: (err: { message: string }) => {
       toast.error(`Sync failed: ${err.message}`);
     },
   });
-  const { data: campaigns, isLoading } = trpc.ads.campaigns.useQuery();
-  const { data: insights } = trpc.ads.insights.useQuery({ days: 30 });
-  const { data: byCountry } = trpc.ads.byCountry.useQuery();
-  const { data: adSets } = trpc.ads.adSets.useQuery();
+
   const [tab, setTab] = useState<"campaigns" | "adsets" | "country">("campaigns");
-  const [sortKey, setSortKey] = useState<SortKey>("spend");
+  const [sortKey, setSortKey] = useState<SortKey>("spend7d");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const handleSort = (key: SortKey) => {
@@ -48,10 +66,11 @@ export default function AdsPerformance() {
     else { setSortKey(key); setSortDir("desc"); }
   };
 
-  const totalSpend = (campaigns || []).reduce((s: number, c: any) => s + Number(c.spend || 0), 0);
-  const totalLeads = (campaigns || []).reduce((s: number, c: any) => s + Number(c.leads || 0), 0);
-  const totalRevenue = (campaigns || []).reduce((s: number, c: any) => s + Number(c.revenue || 0), 0);
-  const avgCtr = campaigns?.length ? (campaigns as any[]).reduce((s: number, c: any) => s + Number(c.avgCtr || 0), 0) / campaigns.length : 0;
+  // KPI aggregates — use engine keys when engine data is active, legacy keys otherwise
+  const totalSpend = campaigns.reduce((s: number, c: any) => s + Number(useEngineData ? (c.spend7d ?? c.spend) : c.spend || 0), 0);
+  const totalLeads = campaigns.reduce((s: number, c: any) => s + Number(useEngineData ? (c.leads7d ?? c.leads) : c.leads || 0), 0);
+  const totalRevenue = campaigns.reduce((s: number, c: any) => s + Number(c.revenue || 0), 0);
+  const avgCtr = campaigns.length ? campaigns.reduce((s: number, c: any) => s + Number(useEngineData ? (c.avgCtr7d ?? c.avgCtr) : c.avgCtr || 0), 0) / campaigns.length : 0;
 
   const chartData = (insights || []).map((d: any) => ({
     date: new Date(d.date).toLocaleDateString("en", { month: "short", day: "numeric" }),
@@ -62,12 +81,12 @@ export default function AdsPerformance() {
     revenue: Number(d.revenue).toFixed(0),
   }));
 
-  const sortedCampaigns = [...(campaigns || [])].sort((a: any, b: any) => {
+  const sortedCampaigns = [...campaigns].sort((a: any, b: any) => {
     const av = Number(a[sortKey] || 0), bv = Number(b[sortKey] || 0);
     return sortDir === "desc" ? bv - av : av - bv;
   });
 
-  const sortedAdSets = [...(adSets || [])].sort((a: any, b: any) => {
+  const sortedAdSets = [...adSets].sort((a: any, b: any) => {
     const av = Number(a[sortKey] || 0), bv = Number(b[sortKey] || 0);
     return sortDir === "desc" ? bv - av : av - bv;
   });
@@ -223,43 +242,52 @@ export default function AdsPerformance() {
               <thead>
                 <tr className="border-b border-border bg-muted/20">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Campaign</th>
-                  <th className="text-left px-4 py-3"><SortBtn k="spend" label="Spend" /></th>
-                  <th className="text-left px-4 py-3"><SortBtn k="leads" label="Leads" /></th>
-                  <th className="text-left px-4 py-3"><SortBtn k="avgCpl" label="CPL" /></th>
-                  <th className="text-left px-4 py-3"><SortBtn k="avgCtr" label="CTR" /></th>
-                  <th className="text-left px-4 py-3"><SortBtn k="conversions" label="Conv." /></th>
-                  <th className="text-left px-4 py-3"><SortBtn k="revenue" label="Revenue" /></th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">ROAS</th>
+                  <th className="text-left px-4 py-3"><SortBtn k={useEngineData ? "spend7d" : "spend"} label={useEngineData ? "Spend (7d)" : "Spend"} /></th>
+                  <th className="text-left px-4 py-3"><SortBtn k={useEngineData ? "leads7d" : "leads"} label={useEngineData ? "Leads (7d)" : "Leads"} /></th>
+                  <th className="text-left px-4 py-3"><SortBtn k={useEngineData ? "avgCpl7d" : "avgCpl"} label="CPL" /></th>
+                  <th className="text-left px-4 py-3"><SortBtn k={useEngineData ? "avgCtr7d" : "avgCtr"} label="CTR" /></th>
+                  {!useEngineData && <th className="text-left px-4 py-3"><SortBtn k="conversions" label="Conv." /></th>}
+                  {!useEngineData && <th className="text-left px-4 py-3"><SortBtn k="revenue" label="Revenue" /></th>}
+                  {!useEngineData && <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">ROAS</th>}
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedCampaigns.map((c: any) => {
-                  const roas = c.spend > 0 ? Number(c.revenue) / Number(c.spend) : 0;
-                  const cplStatus = Number(c.avgCpl) < 5 ? "green" : Number(c.avgCpl) < 8 ? "yellow" : "red";
+                  const spend  = useEngineData ? Number(c.spend7d  ?? c.spend  ?? 0) : Number(c.spend  || 0);
+                  const leads  = useEngineData ? Number(c.leads7d  ?? c.leads  ?? 0) : Number(c.leads  || 0);
+                  const avgCpl = useEngineData ? Number(c.avgCpl7d ?? c.avgCpl ?? 0) : Number(c.avgCpl || 0);
+                  const avgCtr = useEngineData ? Number(c.avgCtr7d ?? c.avgCtr ?? 0) : Number(c.avgCtr || 0);
+                  const impr   = useEngineData ? Number(c.impressions7d ?? 0) : 0;
+                  const roas   = !useEngineData && spend > 0 ? Number(c.revenue) / spend : 0;
+                  const cplStatus = avgCpl > 0 && avgCpl < 5 ? "green" : avgCpl < 8 ? "yellow" : "red";
                   return (
                     <tr key={c.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                       <td className="px-4 py-3">
                         <div>
                           <p className="font-medium text-foreground text-xs">{c.name}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">{c.country}</p>
+                          {useEngineData
+                            ? <p className="text-xs text-muted-foreground mt-0.5">{fmt(impr)} impr.</p>
+                            : <p className="text-xs text-muted-foreground mt-0.5">{c.country}</p>}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-xs font-mono">${Number(c.spend).toFixed(0)}</td>
-                      <td className="px-4 py-3 text-xs font-mono">{Number(c.leads).toFixed(0)}</td>
+                      <td className="px-4 py-3 text-xs font-mono">${spend.toFixed(0)}</td>
+                      <td className="px-4 py-3 text-xs font-mono">{leads.toFixed(0)}</td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={cplStatus} label={`$${Number(c.avgCpl).toFixed(2)}`} />
+                        <StatusBadge status={cplStatus} label={avgCpl > 0 ? `$${avgCpl.toFixed(2)}` : '—'} />
                       </td>
-                      <td className="px-4 py-3 text-xs font-mono">{Number(c.avgCtr).toFixed(3)}%</td>
-                      <td className="px-4 py-3 text-xs font-mono">{Number(c.conversions).toFixed(0)}</td>
-                      <td className="px-4 py-3 text-xs font-mono text-[oklch(0.72_0.16_162)]">${Number(c.revenue).toFixed(0)}</td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={roas >= 3 ? "green" : roas >= 1.5 ? "yellow" : "red"} label={`${roas.toFixed(1)}x`} />
-                      </td>
+                      <td className="px-4 py-3 text-xs font-mono">{avgCtr > 0 ? `${avgCtr.toFixed(3)}%` : '—'}</td>
+                      {!useEngineData && <td className="px-4 py-3 text-xs font-mono">{Number(c.conversions).toFixed(0)}</td>}
+                      {!useEngineData && <td className="px-4 py-3 text-xs font-mono text-[oklch(0.72_0.16_162)]">${Number(c.revenue).toFixed(0)}</td>}
+                      {!useEngineData && (
+                        <td className="px-4 py-3">
+                          <StatusBadge status={roas >= 3 ? "green" : roas >= 1.5 ? "yellow" : "red"} label={`${roas.toFixed(1)}x`} />
+                        </td>
+                      )}
                       <td className="px-4 py-3">
                         <StatusBadge
                           status={c.status === "active" ? "green" : "gray"}
-                          label={c.status}
+                          label={c.status ?? 'unknown'}
                         />
                       </td>
                     </tr>
@@ -276,30 +304,36 @@ export default function AdsPerformance() {
               <thead>
                 <tr className="border-b border-border bg-muted/20">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Ad Set</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Bid Strategy</th>
-                  <th className="text-left px-4 py-3"><SortBtn k="spend" label="Spend" /></th>
-                  <th className="text-left px-4 py-3"><SortBtn k="leads" label="Leads" /></th>
-                  <th className="text-left px-4 py-3"><SortBtn k="avgCpl" label="CPL" /></th>
-                  <th className="text-left px-4 py-3"><SortBtn k="avgCtr" label="CTR" /></th>
+                  {!useEngineData && <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Bid Strategy</th>}
+                  <th className="text-left px-4 py-3"><SortBtn k={useEngineData ? "spend7d" : "spend"} label={useEngineData ? "Spend (7d)" : "Spend"} /></th>
+                  <th className="text-left px-4 py-3"><SortBtn k={useEngineData ? "leads7d" : "leads"} label={useEngineData ? "Leads (7d)" : "Leads"} /></th>
+                  <th className="text-left px-4 py-3"><SortBtn k={useEngineData ? "avgCpl7d" : "avgCpl"} label="CPL" /></th>
+                  <th className="text-left px-4 py-3"><SortBtn k={useEngineData ? "avgCtr7d" : "avgCtr"} label="CTR" /></th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedAdSets.map((a: any) => (
-                  <tr key={a.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                    <td className="px-4 py-3 text-xs font-medium text-foreground">{a.name}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{a.bidStrategy}</td>
-                    <td className="px-4 py-3 text-xs font-mono">${Number(a.spend).toFixed(0)}</td>
-                    <td className="px-4 py-3 text-xs font-mono">{Number(a.leads).toFixed(0)}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={Number(a.avgCpl) < 5 ? "green" : Number(a.avgCpl) < 8 ? "yellow" : "red"} label={`$${Number(a.avgCpl).toFixed(2)}`} />
-                    </td>
-                    <td className="px-4 py-3 text-xs font-mono">{Number(a.avgCtr).toFixed(3)}%</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={a.status === "active" ? "green" : "gray"} label={a.status} />
-                    </td>
-                  </tr>
-                ))}
+                {sortedAdSets.map((a: any) => {
+                    const spend  = useEngineData ? Number(a.spend7d  ?? a.spend  ?? 0) : Number(a.spend  || 0);
+                    const leads  = useEngineData ? Number(a.leads7d  ?? a.leads  ?? 0) : Number(a.leads  || 0);
+                    const avgCpl = useEngineData ? Number(a.avgCpl7d ?? a.avgCpl ?? 0) : Number(a.avgCpl || 0);
+                    const avgCtr = useEngineData ? Number(a.avgCtr7d ?? a.avgCtr ?? 0) : Number(a.avgCtr || 0);
+                    return (
+                    <tr key={a.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-3 text-xs font-medium text-foreground">{a.name}</td>
+                      {!useEngineData && <td className="px-4 py-3 text-xs text-muted-foreground">{a.bidStrategy}</td>}
+                      <td className="px-4 py-3 text-xs font-mono">${spend.toFixed(0)}</td>
+                      <td className="px-4 py-3 text-xs font-mono">{leads.toFixed(0)}</td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={avgCpl > 0 && avgCpl < 5 ? "green" : avgCpl < 8 ? "yellow" : "red"} label={avgCpl > 0 ? `$${avgCpl.toFixed(2)}` : '—'} />
+                      </td>
+                      <td className="px-4 py-3 text-xs font-mono">{avgCtr > 0 ? `${avgCtr.toFixed(3)}%` : '—'}</td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={a.status === "active" ? "green" : "gray"} label={a.status ?? 'unknown'} />
+                      </td>
+                    </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
