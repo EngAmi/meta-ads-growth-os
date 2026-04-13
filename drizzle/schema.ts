@@ -1,4 +1,19 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, json, bigint, boolean } from "drizzle-orm/mysql-core";
+import {
+  int,
+  tinyint,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  varchar,
+  decimal,
+  json,
+  bigint,
+  boolean,
+  date,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/mysql-core";
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 export const users = mysqlTable("users", {
@@ -28,7 +43,7 @@ export const adsAccounts = mysqlTable("ads_accounts", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
-// ─── Campaigns ────────────────────────────────────────────────────────────────
+// ─── Campaigns (legacy) ───────────────────────────────────────────────────────
 export const campaigns = mysqlTable("campaigns", {
   id: int("id").autoincrement().primaryKey(),
   campaignId: varchar("campaignId", { length: 64 }).notNull().unique(),
@@ -45,7 +60,7 @@ export const campaigns = mysqlTable("campaigns", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
-// ─── Ad Sets ──────────────────────────────────────────────────────────────────
+// ─── Ad Sets (legacy) ─────────────────────────────────────────────────────────
 export const adSets = mysqlTable("ad_sets", {
   id: int("id").autoincrement().primaryKey(),
   adSetId: varchar("adSetId", { length: 64 }).notNull().unique(),
@@ -72,7 +87,7 @@ export const ads = mysqlTable("ads", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
-// ─── Ad Insights (daily metrics) ──────────────────────────────────────────────
+// ─── Ad Insights (daily metrics, legacy) ──────────────────────────────────────
 export const adInsights = mysqlTable("ad_insights", {
   id: int("id").autoincrement().primaryKey(),
   campaignId: int("campaignId").notNull(),
@@ -165,7 +180,7 @@ export const funnelBottlenecks = mysqlTable("funnel_bottlenecks", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
-// ─── Recommendations ─────────────────────────────────────────────────────────
+// ─── Recommendations (legacy) ─────────────────────────────────────────────────
 export const recommendations = mysqlTable("recommendations", {
   id: int("id").autoincrement().primaryKey(),
   category: mysqlEnum("category", ["ads", "leads", "sales", "funnel"]).notNull(),
@@ -180,7 +195,7 @@ export const recommendations = mysqlTable("recommendations", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
-// ─── Daily Summaries ──────────────────────────────────────────────────────────
+// ─── Daily Summaries (legacy) ─────────────────────────────────────────────────
 export const dailySummaries = mysqlTable("daily_summaries", {
   id: int("id").autoincrement().primaryKey(),
   date: timestamp("date").notNull(),
@@ -196,7 +211,7 @@ export const dailySummaries = mysqlTable("daily_summaries", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-// ─── Data Connections (Meta API) ────────────────────────────────────────────
+// ─── Data Connections (Meta API) ─────────────────────────────────────────────
 export const dataConnections = mysqlTable("data_connections", {
   id: int("id").autoincrement().primaryKey(),
   platform: mysqlEnum("platform", ["meta_ads"]).default("meta_ads").notNull(),
@@ -250,3 +265,282 @@ export const weeklyReports = mysqlTable("weekly_reports", {
   summary: text("summary"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+// =============================================================================
+// BUILD SLICE v1.1 — ENGINE TABLES
+// =============================================================================
+
+// ─── Workspaces ───────────────────────────────────────────────────────────────
+export const workspaces = mysqlTable(
+  "workspaces",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    name: varchar("name", { length: 255 }).notNull(),
+    ownerId: int("ownerId").notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull().default("UTC"),
+    currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [index("idx_ws_owner").on(t.ownerId)],
+);
+
+export type Workspace = typeof workspaces.$inferSelect;
+export type InsertWorkspace = typeof workspaces.$inferInsert;
+
+// ─── Integrations ─────────────────────────────────────────────────────────────
+export const integrations = mysqlTable(
+  "integrations",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    workspaceId: int("workspaceId").notNull(),
+    provider: varchar("provider", { length: 32 }).notNull().default("meta_ads"),
+    accessToken: text("accessToken").notNull(),
+    metaAccountId: varchar("metaAccountId", { length: 64 }).notNull(),
+    accountName: varchar("accountName", { length: 255 }),
+    status: mysqlEnum("integrationStatus", ["active", "expired", "error"])
+      .notNull()
+      .default("active"),
+    lastSyncAt: timestamp("lastSyncAt"),
+    lastSyncRows: int("lastSyncRows").notNull().default(0),
+    lastSyncError: text("lastSyncError"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_integration_ws_provider").on(t.workspaceId, t.provider),
+    index("idx_integration_ws").on(t.workspaceId),
+  ],
+);
+
+export type Integration = typeof integrations.$inferSelect;
+export type InsertIntegration = typeof integrations.$inferInsert;
+
+// ─── Engine Campaigns ─────────────────────────────────────────────────────────
+export const engineCampaigns = mysqlTable(
+  "engine_campaigns",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    workspaceId: int("workspaceId").notNull(),
+    integrationId: int("integrationId").notNull(),
+    metaCampaignId: varchar("metaCampaignId", { length: 64 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    objective: varchar("objective", { length: 64 }),
+    status: mysqlEnum("engineCampaignStatus", ["ACTIVE", "PAUSED", "DELETED", "ARCHIVED"])
+      .notNull()
+      .default("ACTIVE"),
+    dailyBudget: decimal("dailyBudget", { precision: 12, scale: 4 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_ec_meta_id").on(t.metaCampaignId),
+    index("idx_ec_ws_status").on(t.workspaceId, t.status),
+  ],
+);
+
+export type EngineCampaign = typeof engineCampaigns.$inferSelect;
+export type InsertEngineCampaign = typeof engineCampaigns.$inferInsert;
+
+// ─── Engine Ad Sets ───────────────────────────────────────────────────────────
+export const engineAdSets = mysqlTable(
+  "engine_ad_sets",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    workspaceId: int("workspaceId").notNull(),
+    campaignId: int("campaignId").notNull(),
+    metaAdSetId: varchar("metaAdSetId", { length: 64 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    status: mysqlEnum("engineAdSetStatus", ["ACTIVE", "PAUSED", "DELETED", "ARCHIVED"])
+      .notNull()
+      .default("ACTIVE"),
+    dailyBudget: decimal("dailyBudget", { precision: 12, scale: 4 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_eas_meta_id").on(t.metaAdSetId),
+    index("idx_eas_campaign").on(t.campaignId),
+    index("idx_eas_ws_status").on(t.workspaceId, t.status),
+  ],
+);
+
+export type EngineAdSet = typeof engineAdSets.$inferSelect;
+export type InsertEngineAdSet = typeof engineAdSets.$inferInsert;
+
+// ─── Daily Metrics ────────────────────────────────────────────────────────────
+export const dailyMetrics = mysqlTable(
+  "daily_metrics",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    workspaceId: int("workspaceId").notNull(),
+    entityType: mysqlEnum("entityType", ["campaign", "ad_set"]).notNull(),
+    entityId: int("entityId").notNull(),
+    date: date("date").notNull(),
+    impressions: int("impressions").notNull().default(0),
+    clicks: int("clicks").notNull().default(0),
+    spend: decimal("spend", { precision: 12, scale: 4 }).notNull().default("0"),
+    reach: int("reach").notNull().default(0),
+    frequency: decimal("frequency", { precision: 6, scale: 4 }).notNull().default("0"),
+    leads: int("leads").notNull().default(0),
+    ctr: decimal("ctr", { precision: 8, scale: 6 }).notNull().default("0"),
+    // cpc, cpm, cpl are NULL when denominator is zero; metricsComputation.ts sets them
+    cpc: decimal("cpc", { precision: 10, scale: 4 }),
+    cpm: decimal("cpm", { precision: 10, scale: 4 }),
+    cpl: decimal("cpl", { precision: 10, scale: 4 }),
+  },
+  (t) => [
+    uniqueIndex("idx_dm_entity_date").on(t.entityType, t.entityId, t.date),
+    index("idx_dm_ws_date").on(t.workspaceId, t.date),
+  ],
+);
+
+export type DailyMetric = typeof dailyMetrics.$inferSelect;
+export type InsertDailyMetric = typeof dailyMetrics.$inferInsert;
+
+// ─── Baselines ────────────────────────────────────────────────────────────────
+export const baselines = mysqlTable(
+  "baselines",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    workspaceId: int("workspaceId").notNull(),
+    entityType: mysqlEnum("baselineEntityType", ["campaign", "ad_set"]).notNull(),
+    entityId: int("entityId").notNull(),
+    // metric values: 'ctr' | 'cpl' | 'cpc' | 'cpm' | 'frequency'
+    metric: varchar("metric", { length: 32 }).notNull(),
+    meanValue: decimal("meanValue", { precision: 12, scale: 6 }).notNull(),
+    stdDev: decimal("stdDev", { precision: 12, scale: 6 }).notNull().default("0"),
+    sampleDays: int("sampleDays").notNull().default(0),
+    computedAt: date("computedAt").notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_bl_entity_metric_date").on(
+      t.entityType,
+      t.entityId,
+      t.metric,
+      t.computedAt,
+    ),
+    index("idx_bl_ws_date").on(t.workspaceId, t.computedAt),
+  ],
+);
+
+export type Baseline = typeof baselines.$inferSelect;
+export type InsertBaseline = typeof baselines.$inferInsert;
+
+// ─── Pipeline Runs ────────────────────────────────────────────────────────────
+export const pipelineRuns = mysqlTable(
+  "pipeline_runs",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    workspaceId: int("workspaceId").notNull(),
+    runId: varchar("runId", { length: 36 }).notNull(),
+    status: mysqlEnum("pipelineStatus", ["running", "completed", "failed", "partial"])
+      .notNull()
+      .default("running"),
+    trigger: mysqlEnum("pipelineTrigger", ["cron", "manual"]).notNull(),
+    startedAt: timestamp("startedAt").defaultNow().notNull(),
+    endedAt: timestamp("endedAt"),
+    durationMs: int("durationMs"),
+    stepsCompleted: tinyint("stepsCompleted").notNull().default(0),
+    // stepResults shape: { dataIngestion: {...}, metricsComputation: {...}, ... }
+    // Initialise to {} in application code before insert (TiDB does not support JSON expression defaults)
+    stepResults: json("stepResults").notNull(),
+    // stepErrors shape: { moduleName: "error message" }
+    stepErrors: json("stepErrors").notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_pr_run_id").on(t.runId),
+    index("idx_pr_ws_started").on(t.workspaceId, t.startedAt),
+  ],
+);
+
+export type PipelineRun = typeof pipelineRuns.$inferSelect;
+export type InsertPipelineRun = typeof pipelineRuns.$inferInsert;
+
+// ─── Engine Diagnostics ───────────────────────────────────────────────────────
+export const engineDiagnostics = mysqlTable(
+  "engine_diagnostics",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    workspaceId: int("workspaceId").notNull(),
+    runId: varchar("runId", { length: 36 }).notNull(),
+    // ruleId values: 'C1' | 'C2' | 'F1' | 'F2' | 'A1' | 'S1'
+    ruleId: varchar("ruleId", { length: 8 }).notNull(),
+    category: mysqlEnum("diagCategory", ["creative", "audience", "funnel", "tracking"])
+      .notNull(),
+    entityType: mysqlEnum("diagEntityType", ["campaign", "ad_set"]).notNull(),
+    entityId: int("entityId").notNull(),
+    // severity: 1–100
+    severity: tinyint("severity").notNull(),
+    // evidence shape: { metric, value, baseline, delta, threshold, period, baselineSource, ... }
+    evidence: json("evidence").notNull(),
+    status: mysqlEnum("diagStatus", ["active", "acknowledged"]).notNull().default("active"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_ed_ws_active_sev").on(t.workspaceId, t.status, t.severity),
+    index("idx_ed_run").on(t.runId),
+  ],
+);
+
+export type EngineDiagnostic = typeof engineDiagnostics.$inferSelect;
+export type InsertEngineDiagnostic = typeof engineDiagnostics.$inferInsert;
+
+// ─── Engine Recommendations ───────────────────────────────────────────────────
+export const engineRecommendations = mysqlTable(
+  "engine_recommendations",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    workspaceId: int("workspaceId").notNull(),
+    runId: varchar("runId", { length: 36 }).notNull(),
+    diagnosticId: int("diagnosticId").notNull(),
+    action: mysqlEnum("recAction", ["PAUSE", "SCALE", "TEST", "MONITOR", "FIX_FUNNEL", "FIX_SALES"])
+      .notNull(),
+    entityType: mysqlEnum("recEntityType", ["campaign", "ad_set"]).notNull(),
+    entityId: int("entityId").notNull(),
+    reason: varchar("reason", { length: 512 }).notNull(),
+    evidence: json("evidence").notNull(),
+    confidenceScore: decimal("confidenceScore", { precision: 4, scale: 3 }).notNull(),
+    priorityScore: decimal("priorityScore", { precision: 10, scale: 2 }).notNull(),
+    expectedImpact: decimal("expectedImpact", { precision: 12, scale: 4 }),
+    status: mysqlEnum("recStatus2", ["pending", "accepted", "dismissed", "expired"])
+      .notNull()
+      .default("pending"),
+    expiresAt: timestamp("expiresAt").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [
+    index("idx_er_ws_status_priority").on(t.workspaceId, t.status, t.priorityScore),
+    index("idx_er_diagnostic").on(t.diagnosticId),
+    index("idx_er_run").on(t.runId),
+  ],
+);
+
+export type EngineRecommendation = typeof engineRecommendations.$inferSelect;
+export type InsertEngineRecommendation = typeof engineRecommendations.$inferInsert;
+
+// ─── Daily Briefs ─────────────────────────────────────────────────────────────
+export const dailyBriefs = mysqlTable(
+  "daily_briefs",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    workspaceId: int("workspaceId").notNull(),
+    runId: varchar("runId", { length: 36 }).notNull(),
+    briefDate: date("briefDate").notNull(),
+    // { action: string, entityName: string, reason: string, expectedImpact: number|null, currency: string }
+    actionOfTheDay: json("actionOfTheDay").notNull(),
+    // { ads: 'green'|'yellow'|'red', leads: 'green'|'yellow'|'red', sales: 'green'|'yellow'|'red' }
+    funnelHealth: json("funnelHealth").notNull(),
+    // array of up to 3: { ruleId, category, entityName, severity, headline }
+    topIssues: json("topIssues").notNull(),
+    // { totalSpend, totalLeads, avgCPL, activeCampaigns }
+    kpis: json("kpis").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_db_ws_date").on(t.workspaceId, t.briefDate),
+    index("idx_db_run").on(t.runId),
+  ],
+);
+
+export type DailyBrief = typeof dailyBriefs.$inferSelect;
+export type InsertDailyBrief = typeof dailyBriefs.$inferInsert;
