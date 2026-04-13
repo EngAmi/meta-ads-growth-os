@@ -496,6 +496,8 @@ export const engineRecommendations = mysqlTable(
       .notNull(),
     entityType: mysqlEnum("recEntityType", ["campaign", "ad_set"]).notNull(),
     entityId: int("entityId").notNull(),
+    // ruleId mirrors the diagnostic ruleId for deduplication queries
+    ruleId: varchar("ruleId", { length: 8 }).notNull(),
     reason: varchar("reason", { length: 512 }).notNull(),
     evidence: json("evidence").notNull(),
     confidenceScore: decimal("confidenceScore", { precision: 4, scale: 3 }).notNull(),

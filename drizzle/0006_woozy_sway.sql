@@ -1,0 +1,1 @@
+ALTER TABLE `engine_recommendations` ADD `ruleId` varchar(8) NOT NULL;
