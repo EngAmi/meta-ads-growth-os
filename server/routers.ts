@@ -2,6 +2,12 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { workspaceRouter } from "./routers/workspace";
+import { dataSourcesRouter as engineDataSourcesRouter } from "./routers/dataSources";
+import { adsRouter as engineAdsRouter } from "./routers/ads";
+import { diagnosticsRouter } from "./routers/diagnostics";
+import { recommendationsRouter } from "./routers/recommendations";
+import { dashboardRouter as engineDashboardRouter } from "./routers/dashboard";
 import { getDb } from "./db";
 import {
   adsAccounts, campaigns, adSets, ads, adInsights,
@@ -17,6 +23,14 @@ import { notifyOwner } from "./_core/notification";
 
 export const appRouter = router({
   system: systemRouter,
+  // ─── Build Slice v1.1 engine routers ────────────────────────────────────
+  workspace: workspaceRouter,
+  engineDataSources: engineDataSourcesRouter,
+  engineAds: engineAdsRouter,
+  engineDiagnostics: diagnosticsRouter,
+  engineRecommendations: recommendationsRouter,
+  engineDashboard: engineDashboardRouter,
+  // ────────────────────────────────────────────────────────────────────────
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
@@ -711,7 +725,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
     }),
   }),
 
-  // ─── Data Sources ───────────────────────────────────────────────────────────────────
+  // ─── Data Sources (legacy pre-v1.1 connections) ─────────────────────────────────
   dataSources: router({
     // ─ Connections ─────────────────────────────────────────────────────────────────
     listConnections: publicProcedure.query(async () => {
