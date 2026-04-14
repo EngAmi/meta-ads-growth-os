@@ -6,6 +6,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
 [![tRPC](https://img.shields.io/badge/tRPC-11-398CCB.svg)](https://trpc.io/)
+[![Tests](https://img.shields.io/badge/tests-139%20passing-brightgreen.svg)](#running-tests)
 
 ---
 
@@ -14,6 +15,16 @@
 **Meta Ads Growth OS** is an open-source operational intelligence platform designed for performance marketing teams running Meta (Facebook) ad campaigns. It connects directly to the Meta Graph API via OAuth, ingests campaign data nightly through an automated pipeline, runs a rule-based diagnostic engine, and surfaces actionable insights through a real-time executive dashboard.
 
 The system is built around a single principle: **no more manual exports**. Connect once, and the nightly scheduler handles everything — data ingestion, KPI computation, anomaly detection, and daily briefing generation.
+
+---
+
+## Screenshots
+
+### Executive Dashboard
+![Executive Dashboard — KPI cards, funnel flow, revenue vs. spend chart, and country breakdown](https://d2xsxph8kpxj0f.cloudfront.net/98687482/C9E7CmbrLx7K7Hw6aufPcP/screenshot-dashboard_e36ed1ca.png)
+
+### Data Sources — Meta Ads API Connection
+![Data Sources — Facebook OAuth, manual token form, engine integrations, and saved connections](https://d2xsxph8kpxj0f.cloudfront.net/98687482/C9E7CmbrLx7K7Hw6aufPcP/screenshot-datasources_a86a4790.png)
 
 ---
 
@@ -185,7 +196,7 @@ client/src/pages/Dashboard.tsx       ← Executive KPI dashboard
 
 ## Contributing
 
-Contributions are welcome. Please open an issue first to discuss what you would like to change. Pull requests should include tests for any new engine rules or procedures.
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to add new diagnostic rules, procedures, or UI features.
 
 ---
 
