@@ -963,6 +963,15 @@ function ScheduledRunsTab() {
       return next;
     });
 
+  const utils = trpc.useUtils();
+  const runCronNow = trpc.engineDataSources.runCronNow.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Run ${result.runId.slice(0, 8)}… started — ${result.status}`);
+      utils.engineDataSources.scheduledRuns.invalidate();
+    },
+    onError: (e) => toast.error(e.message || "Failed to start run"),
+  });
+
   const { data: runs = [], isLoading } = trpc.engineDataSources.scheduledRuns.useQuery(
     { status: statusFilter },
     { refetchInterval: 60_000 }
@@ -979,21 +988,35 @@ function ScheduledRunsTab() {
 
   return (
     <div className="space-y-3">
-      {/* Status filter */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {STATUS_OPTIONS.map(opt => (
-          <button
-            key={opt.value}
-            onClick={() => setStatusFilter(opt.value)}
-            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-              statusFilter === opt.value
-                ? "bg-violet-600 border-violet-500 text-white"
-                : "bg-slate-800/60 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
+      {/* Toolbar: filter pills + Run Now button */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          {STATUS_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setStatusFilter(opt.value)}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                statusFilter === opt.value
+                  ? "bg-violet-600 border-violet-500 text-white"
+                  : "bg-slate-800/60 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={runCronNow.isPending}
+          onClick={() => runCronNow.mutate()}
+          className="gap-2 border-slate-600 text-slate-300 hover:text-white hover:border-slate-400 bg-transparent"
+        >
+          {runCronNow.isPending
+            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            : <RefreshCw className="w-3.5 h-3.5" />}
+          {runCronNow.isPending ? "Running…" : "Run Now"}
+        </Button>
       </div>
 
       {runs.length === 0 && (

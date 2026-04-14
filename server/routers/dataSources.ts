@@ -142,6 +142,22 @@ export const dataSourcesRouter = router({
   }),
 
   /**
+   * Manually trigger a cron-style pipeline run from the Scheduled Runs tab.
+   * Uses trigger='cron' so the run appears in the scheduled runs history.
+   */
+  runCronNow: protectedProcedure.mutation(async ({ ctx }) => {
+    const workspaceId = await resolveWorkspaceId(ctx.user.id, ctx.user.name);
+
+    const result = await runPipeline({ workspaceId, trigger: "cron" });
+
+    return {
+      runId: result.runId,
+      status: result.status,
+      stepsCompleted: result.stepsCompleted,
+    };
+  }),
+
+  /**
    * Return the most recent pipeline_runs row for the workspace.
    * Used by the UI to poll sync progress.
    */
