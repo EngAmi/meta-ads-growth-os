@@ -1277,6 +1277,43 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
           cpl:          Number(r.leads) > 0 ? Number(r.spend) / Number(r.leads) : 0,
         }));
       }),
+
+    /**
+     * Spend, leads, and CPL grouped by country for the given date range.
+     * Rows with a NULL/empty country are grouped under "Unknown".
+     */
+    countryBreakdown: publicProcedure
+      .input(z.object({
+        from: z.string().optional(),
+        to:   z.string().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return [];
+        const from = input?.from ? new Date(`${input.from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 86_400_000);
+        const to   = input?.to   ? new Date(`${input.to}T23:59:59.999Z`)   : new Date();
+        const rows = await db
+          .select({
+            country:     sql<string>`COALESCE(NULLIF(TRIM(${adInsights.country}), ''), 'Unknown')`,
+            spend:       sql<number>`COALESCE(SUM(CAST(${adInsights.spend} AS DECIMAL(14,4))), 0)`,
+            leads:       sql<number>`COALESCE(SUM(${adInsights.leads}), 0)`,
+            impressions: sql<number>`COALESCE(SUM(${adInsights.impressions}), 0)`,
+            clicks:      sql<number>`COALESCE(SUM(${adInsights.clicks}), 0)`,
+          })
+          .from(adInsights)
+          .where(and(gte(adInsights.date, from), lte(adInsights.date, to)))
+          .groupBy(sql`COALESCE(NULLIF(TRIM(${adInsights.country}), ''), 'Unknown')`)
+          .orderBy(sql`SUM(CAST(${adInsights.spend} AS DECIMAL(14,4))) DESC`)
+          .limit(20);
+        return rows.map(r => ({
+          country:     r.country,
+          spend:       Number(r.spend),
+          leads:       Number(r.leads),
+          impressions: Number(r.impressions),
+          clicks:      Number(r.clicks),
+          cpl:         Number(r.leads) > 0 ? Number(r.spend) / Number(r.leads) : 0,
+        }));
+      }),
   }),
 
   // ─── WhatsApp Webhook Settings ────────────────────────────────────────────
