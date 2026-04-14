@@ -21,6 +21,43 @@ import { z } from "zod";
 import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
 
+// ─── CSV date normalizer ─────────────────────────────────────────────────────
+/**
+ * Normalise a raw date value from a CSV/Excel row to a UTC midnight Date.
+ * Handles:
+ *   1. Excel serial numbers  (e.g. 46113  → 2026-04-11)
+ *   2. ISO strings           (e.g. "2026-04-01")
+ *   3. Meta-style strings    (e.g. "Apr 11, 2026", "11/04/2026")
+ * Returns null if the value cannot be parsed so the caller can skip the row.
+ */
+function normalizeDate(raw: unknown): Date | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+
+  // Numeric value → Excel serial date (days since 1899-12-30)
+  const n = Number(raw);
+  if (!isNaN(n) && !/^\d{4}-/.test(String(raw))) {
+    if (n < 1 || n > 2958465) return null; // sanity bounds (1900-01-01 … 9999-12-31)
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    const d = new Date(excelEpoch.getTime() + n * 86_400_000);
+    console.debug(`[CSV Import] Excel serial ${n} → ${d.toISOString().slice(0, 10)}`);
+    return d;
+  }
+
+  // String value → attempt standard Date parse
+  const s = String(raw).trim();
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    // Force UTC midnight to avoid timezone drift
+    const iso = d.toISOString().slice(0, 10);
+    const utc = new Date(`${iso}T00:00:00.000Z`);
+    console.debug(`[CSV Import] Date string "${s}" → ${iso}`);
+    return utc;
+  }
+
+  console.warn(`[CSV Import] Could not parse date value: ${JSON.stringify(raw)} — row will be skipped`);
+  return null;
+}
+
 export const appRouter = router({
   system: systemRouter,
   // ─── Build Slice v1.1 engine routers ────────────────────────────────────
@@ -929,8 +966,8 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
 
             if (!dateRaw || spend === 0 && impressions === 0) { skipped++; continue; }
 
-            const parsedDate = new Date(dateRaw);
-            if (isNaN(parsedDate.getTime())) { skipped++; continue; }
+            const parsedDate = normalizeDate(dateRaw);
+            if (!parsedDate) { skipped++; continue; }
 
             // Upsert campaign
             const existingCampaigns = await db.select({ id: campaigns.id })
