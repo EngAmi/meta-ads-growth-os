@@ -42,7 +42,7 @@ const TWENTY_HOURS_MS = 20 * 60 * 60 * 1000;
  */
 const DEFAULT_CRON_SCHEDULE = "0 0 * * *";
 
-function resolveCronSchedule(): string {
+export function resolveCronSchedule(): string {
   const envVal = process.env.CRON_SCHEDULE?.trim();
   if (!envVal) return DEFAULT_CRON_SCHEDULE;
   if (!cron.validate(envVal)) {
