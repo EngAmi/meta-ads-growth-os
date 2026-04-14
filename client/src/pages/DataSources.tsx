@@ -157,6 +157,16 @@ function MetaConnectionForm({ onSaved }: { onSaved: () => void }) {
 
   return (
     <div className="space-y-6">
+      {/* Facebook OAuth — one-click connection */}
+      <div className="space-y-3">
+        <FacebookOAuthButton />
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-slate-700" />
+          <span className="text-xs text-slate-500">or connect manually with an access token</span>
+          <div className="flex-1 h-px bg-slate-700" />
+        </div>
+      </div>
+
       {/* How-to guide */}
       <div className="flex gap-3 p-4 rounded-xl bg-blue-500/5 border border-blue-500/20">
         <Info className="w-5 h-5 text-blue-400 mt-0.5 shrink-0" />

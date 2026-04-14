@@ -246,7 +246,7 @@ export function registerMetaOAuthRoutes(app: Express) {
         .where(
           and(
             eq(integrations.workspaceId, workspaceId),
-            eq(integrations.provider, "meta"),
+            eq(integrations.provider, "meta_ads"),
             eq(integrations.metaAccountId, accountId),
           ),
         )
@@ -264,7 +264,7 @@ export function registerMetaOAuthRoutes(app: Express) {
       } else {
         await db.insert(integrations).values({
           workspaceId,
-          provider: "meta",
+          provider: "meta_ads",
           accessToken: longLivedToken,
           metaAccountId: accountId,
           status: "active",
