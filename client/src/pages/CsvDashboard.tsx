@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import {
   ResponsiveContainer,
@@ -30,6 +30,7 @@ import {
   Target,
   Zap,
 } from "lucide-react";
+import { useDateRange, PRESET_LABELS } from "@/contexts/DateRangeContext";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -46,6 +47,10 @@ function fmt(n: number, style: "currency" | "decimal" | "percent" = "decimal", d
 function fmtDay(d: string) {
   const dt = new Date(`${d}T00:00:00Z`);
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function toISO(d: Date) {
+  return d.toISOString().slice(0, 10);
 }
 
 // ─── KPI card ────────────────────────────────────────────────────────────────
@@ -73,18 +78,6 @@ function KpiCard({ label, value, sub, icon, color }: KpiProps) {
   );
 }
 
-// ─── date range presets ───────────────────────────────────────────────────────
-
-type Preset = "7d" | "14d" | "30d" | "90d" | "all";
-
-function presetToDates(p: Preset): { from?: string; to?: string } {
-  if (p === "all") return {};
-  const days = p === "7d" ? 7 : p === "14d" ? 14 : p === "30d" ? 30 : 90;
-  const from = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
-  const to = new Date().toISOString().slice(0, 10);
-  return { from, to };
-}
-
 // ─── metric selector options ──────────────────────────────────────────────────
 
 const METRICS = [
@@ -102,18 +95,25 @@ type MetricKey = (typeof METRICS)[number]["value"];
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function CsvDashboard() {
-  const [preset, setPreset] = useState<Preset>("30d");
-  const [primaryMetric, setPrimaryMetric]   = useState<MetricKey>("spend");
+  const { dateRange } = useDateRange();
+
+  // Derive ISO strings from the global date range — stable via useMemo
+  const range = useMemo(() => ({
+    from: toISO(dateRange.from),
+    to:   toISO(dateRange.to),
+  }), [dateRange.from, dateRange.to]);
+
+  const [primaryMetric,   setPrimaryMetric]   = useState<MetricKey>("spend");
   const [secondaryMetric, setSecondaryMetric] = useState<MetricKey>("leads");
 
-  const range = useMemo(() => presetToDates(preset), [preset]);
-
-  const { data: summary, isLoading: loadingSummary } = trpc.csvDashboard.summary.useQuery(range);
-  const { data: trend,   isLoading: loadingTrend   } = trpc.csvDashboard.dailyTrend.useQuery(range);
+  const { data: summary,   isLoading: loadingSummary   } = trpc.csvDashboard.summary.useQuery(range);
+  const { data: trend,     isLoading: loadingTrend     } = trpc.csvDashboard.dailyTrend.useQuery(range);
   const { data: campaigns, isLoading: loadingCampaigns } = trpc.csvDashboard.campaignBreakdown.useQuery(range);
 
   const primaryColor   = METRICS.find(m => m.value === primaryMetric)?.color   ?? "#6366f1";
   const secondaryColor = METRICS.find(m => m.value === secondaryMetric)?.color ?? "#10b981";
+
+  const rangeLabel = PRESET_LABELS[dateRange.preset] ?? "Custom range";
 
   return (
     <div className="p-6 space-y-6 min-h-screen bg-[#080f1e] text-white">
@@ -121,23 +121,15 @@ export default function CsvDashboard() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white">CSV Metrics Dashboard</h1>
-          <p className="text-sm text-white/50 mt-0.5">Visualising imported Meta Ads data</p>
+          <p className="text-sm text-white/50 mt-0.5">
+            Showing imported Meta Ads data &mdash;{" "}
+            <span className="text-indigo-400 font-medium">{rangeLabel}</span>
+            {" "}({range.from} &rarr; {range.to})
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          {(["7d", "14d", "30d", "90d", "all"] as Preset[]).map(p => (
-            <button
-              key={p}
-              onClick={() => setPreset(p)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                preset === p
-                  ? "bg-indigo-600 text-white"
-                  : "bg-white/5 text-white/60 hover:bg-white/10"
-              }`}
-            >
-              {p === "all" ? "All" : p.toUpperCase()}
-            </button>
-          ))}
-        </div>
+        <p className="text-xs text-white/30 italic">
+          Use the date picker in the top bar to change the range
+        </p>
       </div>
 
       {/* KPI cards */}
@@ -149,19 +141,19 @@ export default function CsvDashboard() {
         </div>
       ) : summary ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <KpiCard label="Total Spend"       value={fmt(summary.totalSpend, "currency")}   icon={<DollarSign className="w-5 h-5 text-indigo-300" />}  color="bg-indigo-500/20" />
-          <KpiCard label="Impressions"       value={fmt(summary.totalImpressions)}          icon={<Eye className="w-5 h-5 text-cyan-300" />}           color="bg-cyan-500/20" />
-          <KpiCard label="Clicks"            value={fmt(summary.totalClicks)}               icon={<MousePointerClick className="w-5 h-5 text-amber-300" />} color="bg-amber-500/20" />
-          <KpiCard label="Total Leads"       value={fmt(summary.totalLeads)}                icon={<Users className="w-5 h-5 text-emerald-300" />}       color="bg-emerald-500/20" />
-          <KpiCard label="Avg CPL"           value={fmt(summary.avgCpl, "currency")}        icon={<Target className="w-5 h-5 text-rose-300" />}         color="bg-rose-500/20" />
-          <KpiCard label="Avg CTR"           value={fmt(summary.avgCtr, "percent")}         icon={<TrendingUp className="w-5 h-5 text-violet-300" />}   color="bg-violet-500/20" />
-          <KpiCard label="Avg CPM"           value={fmt(summary.avgCpm, "currency")}        icon={<BarChart2 className="w-5 h-5 text-orange-300" />}    color="bg-orange-500/20" />
-          <KpiCard label="Avg CPC"           value={fmt(summary.avgCpc, "currency")}        icon={<Zap className="w-5 h-5 text-pink-300" />}            color="bg-pink-500/20"
+          <KpiCard label="Total Spend"   value={fmt(summary.totalSpend, "currency")}   icon={<DollarSign className="w-5 h-5 text-indigo-300" />}       color="bg-indigo-500/20" />
+          <KpiCard label="Impressions"   value={fmt(summary.totalImpressions)}          icon={<Eye className="w-5 h-5 text-cyan-300" />}               color="bg-cyan-500/20" />
+          <KpiCard label="Clicks"        value={fmt(summary.totalClicks)}               icon={<MousePointerClick className="w-5 h-5 text-amber-300" />} color="bg-amber-500/20" />
+          <KpiCard label="Total Leads"   value={fmt(summary.totalLeads)}                icon={<Users className="w-5 h-5 text-emerald-300" />}           color="bg-emerald-500/20" />
+          <KpiCard label="Avg CPL"       value={fmt(summary.avgCpl, "currency")}        icon={<Target className="w-5 h-5 text-rose-300" />}             color="bg-rose-500/20" />
+          <KpiCard label="Avg CTR"       value={fmt(summary.avgCtr, "percent")}         icon={<TrendingUp className="w-5 h-5 text-violet-300" />}       color="bg-violet-500/20" />
+          <KpiCard label="Avg CPM"       value={fmt(summary.avgCpm, "currency")}        icon={<BarChart2 className="w-5 h-5 text-orange-300" />}        color="bg-orange-500/20" />
+          <KpiCard label="Avg CPC"       value={fmt(summary.avgCpc, "currency")}        icon={<Zap className="w-5 h-5 text-pink-300" />}               color="bg-pink-500/20"
             sub={`${summary.rowCount.toLocaleString()} rows imported`}
           />
         </div>
       ) : (
-        <div className="text-white/40 text-sm">No data available. Upload a CSV first.</div>
+        <div className="text-white/40 text-sm">No data available for this date range. Upload a CSV first.</div>
       )}
 
       {/* Trend chart */}
@@ -223,15 +215,35 @@ export default function CsvDashboard() {
                 <Tooltip
                   contentStyle={{ background: "#0f1729", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#fff" }}
                   labelFormatter={fmtDay}
-                  formatter={(v: number, name: string) => [fmt(v, name === "spend" || name === "cpl" || name === "avgCpm" || name === "avgCpc" ? "currency" : "decimal"), name]}
+                  formatter={(v: number, name: string) => [
+                    fmt(v, ["spend","cpl","avgCpm","avgCpc"].includes(name) ? "currency" : "decimal"),
+                    name,
+                  ]}
                 />
                 <Legend wrapperStyle={{ color: "rgba(255,255,255,0.5)", fontSize: 12 }} />
-                <Bar yAxisId="left" dataKey={primaryMetric} name={METRICS.find(m => m.value === primaryMetric)?.label} fill={primaryColor} opacity={0.8} radius={[3, 3, 0, 0]} />
-                <Line yAxisId="right" type="monotone" dataKey={secondaryMetric} name={METRICS.find(m => m.value === secondaryMetric)?.label} stroke={secondaryColor} strokeWidth={2} dot={false} />
+                <Bar
+                  yAxisId="left"
+                  dataKey={primaryMetric}
+                  name={METRICS.find(m => m.value === primaryMetric)?.label}
+                  fill={primaryColor}
+                  opacity={0.8}
+                  radius={[3, 3, 0, 0]}
+                />
+                <Line
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey={secondaryMetric}
+                  name={METRICS.find(m => m.value === secondaryMetric)?.label}
+                  stroke={secondaryColor}
+                  strokeWidth={2}
+                  dot={false}
+                />
               </ComposedChart>
             </ResponsiveContainer>
           ) : (
-            <div className="h-64 flex items-center justify-center text-white/30 text-sm">No trend data for this period</div>
+            <div className="h-64 flex items-center justify-center text-white/30 text-sm">
+              No trend data for this period
+            </div>
           )}
         </CardContent>
       </Card>
@@ -260,7 +272,10 @@ export default function CsvDashboard() {
               </thead>
               <tbody>
                 {campaigns.map((c, i) => (
-                  <tr key={c.campaignId} className={`border-b border-white/5 hover:bg-white/5 transition-colors ${i % 2 === 0 ? "" : "bg-white/[0.02]"}`}>
+                  <tr
+                    key={c.campaignId}
+                    className={`border-b border-white/5 hover:bg-white/5 transition-colors ${i % 2 === 0 ? "" : "bg-white/[0.02]"}`}
+                  >
                     <td className="py-3 pr-4 text-white font-medium max-w-[220px] truncate" title={c.campaignName}>
                       {c.campaignName}
                     </td>
@@ -269,7 +284,16 @@ export default function CsvDashboard() {
                     <td className="text-right py-3 px-3 text-white/70">{fmt(c.clicks)}</td>
                     <td className="text-right py-3 px-3 text-white/70">{c.leads.toLocaleString()}</td>
                     <td className="text-right py-3 px-3">
-                      <Badge variant="outline" className={`text-xs border-0 ${c.cpl > 0 && c.cpl < 10 ? "bg-emerald-500/20 text-emerald-300" : c.cpl < 20 ? "bg-amber-500/20 text-amber-300" : "bg-rose-500/20 text-rose-300"}`}>
+                      <Badge
+                        variant="outline"
+                        className={`text-xs border-0 ${
+                          c.cpl > 0 && c.cpl < 10
+                            ? "bg-emerald-500/20 text-emerald-300"
+                            : c.cpl < 20
+                            ? "bg-amber-500/20 text-amber-300"
+                            : "bg-rose-500/20 text-rose-300"
+                        }`}
+                      >
                         {c.cpl > 0 ? fmt(c.cpl, "currency") : "—"}
                       </Badge>
                     </td>
@@ -280,7 +304,9 @@ export default function CsvDashboard() {
               </tbody>
             </table>
           ) : (
-            <div className="py-12 text-center text-white/30 text-sm">No campaign data for this period</div>
+            <div className="py-12 text-center text-white/30 text-sm">
+              No campaign data for this period
+            </div>
           )}
         </CardContent>
       </Card>
