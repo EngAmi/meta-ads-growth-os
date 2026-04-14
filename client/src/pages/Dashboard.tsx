@@ -30,6 +30,9 @@ export default function Dashboard() {
   const { data: engineBrief, refetch: refetchBrief } = trpc.engineDashboard.brief.useQuery();
   const { data: engineFunnelHealth } = trpc.engineDashboard.funnelHealth.useQuery();
   const { data: engineRunStatus, refetch: refetchRunStatus } = trpc.engineDataSources.runStatus.useQuery();
+  // Fetch real integrations to determine if the user has actually connected an account.
+  // engineRunStatus alone is NOT sufficient — it is truthy even for seed-data runs.
+  const { data: engineIntegrations } = trpc.engineDataSources.list.useQuery();
 
   const syncNow = trpc.engineDataSources.syncNow.useMutation({
     onSuccess: (result) => {
@@ -92,7 +95,9 @@ export default function Dashboard() {
   const lastSyncedAt: Date | null = (engineRunStatus as any)?.endedAt
     ? new Date((engineRunStatus as any).endedAt)
     : connStatus?.lastSyncedAt ? new Date(connStatus.lastSyncedAt) : null;
-  const hasActiveConnection = !!(engineRunStatus || connStatus?.hasActiveConnection);
+  // hasActiveConnection = true only when a real Meta Ads integration row exists.
+  const hasRealIntegration = Array.isArray(engineIntegrations) && engineIntegrations.length > 0;
+  const hasActiveConnection = !!(hasRealIntegration || connStatus?.hasActiveConnection);
 
   // Top issues — prefer engine brief, fall back to legacy bottlenecks
   const topIssues = (engineBrief as any)?.topIssues?.length

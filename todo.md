@@ -95,3 +95,6 @@
 - [x] Frontend: "Connect with Facebook" button on DataSources page
 - [x] Frontend: meta_connected / meta_error query param handling on redirect back to /data-sources
 - [x] Vitest credential validation test (25 tests passing)
+
+## No-Integration Alert
+- [x] Show "Connect Meta Ads" banner on Dashboard when no active integration exists (delete seed data + show real empty state with link to Data Sources)
