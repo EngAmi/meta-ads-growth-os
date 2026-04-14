@@ -17,7 +17,7 @@ import type { Express, Request, Response } from "express";
 import { randomBytes } from "crypto";
 import { eq, and } from "drizzle-orm";
 import { getDb } from "./db";
-import { integrations, workspaces } from "../drizzle/schema";
+import { integrations, metaOAuthSessions, workspaces } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { sdk } from "./_core/sdk";
 
@@ -33,6 +33,7 @@ const SCOPES = [
 
 const STATE_COOKIE = "meta_oauth_state";
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -227,52 +228,61 @@ export function registerMetaOAuthRoutes(app: Express) {
       // Fetch ad accounts accessible by this token
       const adAccounts = await fetchAdAccounts(longLivedToken);
 
+      if (adAccounts.length === 0) {
+        res.redirect(302, `/data-sources?meta_error=${encodeURIComponent("No ad accounts found for this Facebook user")}`);
+        return;
+      }
+
       // Resolve or create workspace for this user
       const workspaceId = await resolveWorkspaceId(user.id, user.name);
 
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
 
-      // Save the first ad account (user can add more via the manual form)
-      const primaryAccount = adAccounts[0];
-      const accountId = primaryAccount?.account_id
-        ?? primaryAccount?.id?.replace("act_", "")
-        ?? "unknown";
-
-      // Check if an integration for this account already exists
-      const existing = await db
-        .select({ id: integrations.id })
-        .from(integrations)
-        .where(
-          and(
-            eq(integrations.workspaceId, workspaceId),
-            eq(integrations.provider, "meta_ads"),
-            eq(integrations.metaAccountId, accountId),
-          ),
-        )
-        .limit(1);
-
-      if (existing.length > 0) {
-        await db
-          .update(integrations)
-          .set({
-            accessToken: longLivedToken,
-            status: "active",
-            updatedAt: new Date(),
-          })
-          .where(eq(integrations.id, existing[0].id));
-      } else {
-        await db.insert(integrations).values({
-          workspaceId,
-          provider: "meta_ads",
-          accessToken: longLivedToken,
-          metaAccountId: accountId,
-          status: "active",
-        });
+      // If only one account, skip the picker and save directly
+      if (adAccounts.length === 1) {
+        const acc = adAccounts[0];
+        const accountId = acc.account_id ?? acc.id.replace("act_", "");
+        const existing = await db
+          .select({ id: integrations.id })
+          .from(integrations)
+          .where(
+            and(
+              eq(integrations.workspaceId, workspaceId),
+              eq(integrations.provider, "meta_ads"),
+              eq(integrations.metaAccountId, accountId),
+            )
+          )
+          .limit(1);
+        if (existing.length > 0) {
+          await db.update(integrations)
+            .set({ accessToken: longLivedToken, status: "active", updatedAt: new Date() })
+            .where(eq(integrations.id, existing[0].id));
+        } else {
+          await db.insert(integrations).values({
+            workspaceId, provider: "meta_ads", accessToken: longLivedToken,
+            metaAccountId: accountId, accountName: acc.name ?? null, status: "active",
+          });
+        }
+        console.log(`[Meta OAuth] Single account auto-saved — workspace ${workspaceId}, account ${accountId}`);
+        res.redirect(302, "/data-sources?meta_connected=1");
+        return;
       }
 
-      console.log(`[Meta OAuth] Integration saved — workspace ${workspaceId}, account ${accountId}, user ${user.id}`);
-      res.redirect(302, "/data-sources?meta_connected=1");
+      // Multiple accounts — store a pending session and redirect to the picker
+      const sessionId = randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+      await db.insert(metaOAuthSessions).values({
+        id: sessionId,
+        userId: user.id,
+        workspaceId,
+        longLivedToken,
+        adAccountsJson: JSON.stringify(adAccounts),
+        expiresAt,
+      });
+
+      console.log(`[Meta OAuth] ${adAccounts.length} accounts found — redirecting to picker, session ${sessionId}`);
+      res.redirect(302, `/data-sources?meta_session=${sessionId}`);
     } catch (err) {
       console.error("[Meta OAuth] Callback error:", err);
       res.redirect(302, `/data-sources?meta_error=${encodeURIComponent(String(err))}`);

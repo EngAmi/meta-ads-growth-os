@@ -1103,19 +1103,180 @@ function ScheduledRunsTab() {
   );
 }
 
+// ─── OAuth Account Picker Modal ──────────────────────────────────────────────
+type OAuthAdAccount = { id: string; name: string; account_id: string; account_status?: number; currency?: string };
+
+function OAuthAccountPickerModal({
+  sessionId,
+  onConfirmed,
+  onCancel,
+}: {
+  sessionId: string;
+  onConfirmed: () => void;
+  onCancel: () => void;
+}) {
+  const [selected, setSelected] = useState<OAuthAdAccount | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  const { data, isLoading, error } = trpc.engineDataSources.getOAuthPendingAccounts.useQuery(
+    { sessionId },
+    { retry: false }
+  );
+
+  const confirmMutation = trpc.engineDataSources.confirmOAuthAccount.useMutation();
+  const utils = trpc.useUtils();
+
+  const handleConfirm = async () => {
+    if (!selected) return;
+    setConfirming(true);
+    try {
+      const accountId = selected.account_id ?? selected.id.replace("act_", "");
+      await confirmMutation.mutateAsync({
+        sessionId,
+        accountId,
+        accountName: selected.name,
+      });
+      await utils.dataSources.listConnections.invalidate();
+      await utils.engineDataSources.list.invalidate();
+      toast.success(`Connected: ${selected.name}`);
+      onConfirmed();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to save connection");
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-slate-700">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-5 h-5 fill-blue-400">
+                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-white font-semibold">Select Ad Account</h2>
+              <p className="text-slate-400 text-xs">Choose which account to connect to Growth OS</p>
+            </div>
+          </div>
+          <button onClick={onCancel} className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors">
+            <XCircle className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-5">
+          {isLoading && (
+            <div className="flex items-center justify-center py-12 gap-3 text-slate-400">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span className="text-sm">Loading ad accounts…</span>
+            </div>
+          )}
+
+          {error && (
+            <div className="flex items-start gap-3 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300">
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium">Session error</p>
+                <p className="text-xs mt-0.5 text-red-400">{error.message}</p>
+                <button onClick={onCancel} className="text-xs mt-2 underline text-red-300 hover:text-white">Go back and reconnect</button>
+              </div>
+            </div>
+          )}
+
+          {data && data.accounts.length === 0 && (
+            <div className="flex items-center gap-3 p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-300">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <span className="text-sm">No ad accounts found for this Facebook user.</span>
+            </div>
+          )}
+
+          {data && data.accounts.length > 0 && (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {data.accounts.map((acc) => {
+                const accountId = acc.account_id ?? acc.id.replace("act_", "");
+                const isActive = acc.account_status === 1 || acc.account_status === undefined;
+                const isSelected = selected?.id === acc.id;
+                return (
+                  <button
+                    key={acc.id}
+                    onClick={() => setSelected(acc)}
+                    className={`w-full flex items-center justify-between p-4 rounded-xl border text-left transition-all ${
+                      isSelected
+                        ? "bg-violet-600/15 border-violet-500/60 ring-1 ring-violet-500/40"
+                        : "bg-slate-800/40 border-slate-700/50 hover:border-slate-600 hover:bg-slate-800/70"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                        isSelected ? "border-violet-400 bg-violet-400" : "border-slate-500"
+                      }`}>
+                        {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">{acc.name}</p>
+                        <p className="text-xs text-slate-400 font-mono mt-0.5">act_{accountId}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {acc.currency && <span className="text-xs text-slate-400">{acc.currency}</span>}
+                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                        isActive
+                          ? "text-emerald-400 bg-emerald-400/10 border-emerald-400/30"
+                          : "text-red-400 bg-red-400/10 border-red-400/30"
+                      }`}>{isActive ? "Active" : "Inactive"}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {data && data.accounts.length > 0 && (
+          <div className="flex items-center justify-between p-5 border-t border-slate-700">
+            <button onClick={onCancel} className="text-sm text-slate-400 hover:text-white transition-colors">
+              Cancel
+            </button>
+            <Button
+              onClick={handleConfirm}
+              disabled={!selected || confirming}
+              className="bg-violet-600 hover:bg-violet-500 text-white gap-2"
+            >
+              {confirming
+                ? <><Loader2 className="w-4 h-4 animate-spin" />Connecting…</>
+                : <><CheckCircle2 className="w-4 h-4" />Connect {selected ? selected.name : "Account"}</>}
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function DataSources() {
   const { refetch } = trpc.dataSources.listConnections.useQuery();
+  const [oauthSessionId, setOauthSessionId] = useState<string | null>(null);
 
   // Handle OAuth redirect result query params
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const connected = params.get("meta_connected");
     const error = params.get("meta_error");
+    const session = params.get("meta_session");
+
     if (connected === "1") {
       toast.success("Meta Ads connected via Facebook — your ad account is now linked.");
       refetch();
-      // Clean the URL without a page reload
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (session) {
+      // Multiple accounts — show the picker modal
+      setOauthSessionId(session);
       window.history.replaceState({}, "", window.location.pathname);
     } else if (error) {
       const msg = decodeURIComponent(error);
@@ -1131,6 +1292,13 @@ export default function DataSources() {
 
   return (
     <DashboardLayout>
+      {oauthSessionId && (
+        <OAuthAccountPickerModal
+          sessionId={oauthSessionId}
+          onConfirmed={() => { setOauthSessionId(null); refetch(); }}
+          onCancel={() => setOauthSessionId(null)}
+        />
+      )}
       <div className="p-6 space-y-6 max-w-5xl mx-auto">
         <div>
           <h1 className="text-2xl font-bold text-white">Data Sources</h1>

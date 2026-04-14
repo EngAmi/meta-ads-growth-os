@@ -14,7 +14,7 @@ import { eq, and, desc, sql, SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
-import { integrations, pipelineRuns } from "../../drizzle/schema";
+import { integrations, pipelineRuns, metaOAuthSessions } from "../../drizzle/schema";
 import { runPipeline } from "../engines/pipeline";
 import { resolveOrCreateWorkspace } from "./_workspace";
 
@@ -254,9 +254,118 @@ export const dataSourcesRouter = router({
         })
         .from(pipelineRuns)
         .where(and(...conditions))
-        .orderBy(desc(pipelineRuns.startedAt))
+         .orderBy(desc(pipelineRuns.startedAt))
         .limit(input?.limit ?? 20);
-
       return rows;
+    }),
+
+  /**
+   * Return the pending ad accounts stored after a Facebook OAuth callback.
+   * The session token comes from the ?meta_session=<id> query param.
+   */
+  getOAuthPendingAccounts: protectedProcedure
+    .input(z.object({ sessionId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const rows = await db
+        .select()
+        .from(metaOAuthSessions)
+        .where(
+          and(
+            eq(metaOAuthSessions.id, input.sessionId),
+            eq(metaOAuthSessions.userId, ctx.user.id),
+          )
+        )
+        .limit(1);
+
+      if (rows.length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "OAuth session not found or expired" });
+      }
+
+      const session = rows[0];
+      if (new Date() > session.expiresAt) {
+        await db.delete(metaOAuthSessions).where(eq(metaOAuthSessions.id, input.sessionId));
+        throw new TRPCError({ code: "NOT_FOUND", message: "OAuth session expired — please reconnect" });
+      }
+
+      const accounts = JSON.parse(session.adAccountsJson) as Array<{
+        id: string; name: string; account_id: string; account_status?: number; currency?: string;
+      }>;
+
+      return { accounts, sessionId: session.id };
+    }),
+
+  /**
+   * Confirm a selected ad account from a pending OAuth session.
+   * Saves the integration and deletes the session row.
+   */
+  confirmOAuthAccount: protectedProcedure
+    .input(z.object({
+      sessionId: z.string(),
+      accountId: z.string(),   // account_id (without act_ prefix)
+      accountName: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const rows = await db
+        .select()
+        .from(metaOAuthSessions)
+        .where(
+          and(
+            eq(metaOAuthSessions.id, input.sessionId),
+            eq(metaOAuthSessions.userId, ctx.user.id),
+          )
+        )
+        .limit(1);
+
+      if (rows.length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "OAuth session not found or expired" });
+      }
+
+      const session = rows[0];
+      if (new Date() > session.expiresAt) {
+        await db.delete(metaOAuthSessions).where(eq(metaOAuthSessions.id, input.sessionId));
+        throw new TRPCError({ code: "NOT_FOUND", message: "OAuth session expired — please reconnect" });
+      }
+
+      const { longLivedToken, workspaceId } = session;
+
+      // Upsert integration for the selected account
+      const existing = await db
+        .select({ id: integrations.id })
+        .from(integrations)
+        .where(
+          and(
+            eq(integrations.workspaceId, workspaceId),
+            eq(integrations.provider, "meta_ads"),
+            eq(integrations.metaAccountId, input.accountId),
+          )
+        )
+        .limit(1);
+
+      if (existing.length > 0) {
+        await db
+          .update(integrations)
+          .set({ accessToken: longLivedToken, status: "active", updatedAt: new Date() })
+          .where(eq(integrations.id, existing[0].id));
+      } else {
+        await db.insert(integrations).values({
+          workspaceId,
+          provider: "meta_ads",
+          accessToken: longLivedToken,
+          metaAccountId: input.accountId,
+          accountName: input.accountName ?? null,
+          status: "active",
+        });
+      }
+
+      // Clean up the session
+      await db.delete(metaOAuthSessions).where(eq(metaOAuthSessions.id, input.sessionId));
+
+      return { success: true, accountId: input.accountId };
     }),
 });

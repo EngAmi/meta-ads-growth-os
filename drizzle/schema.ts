@@ -546,3 +546,25 @@ export const dailyBriefs = mysqlTable(
 
 export type DailyBrief = typeof dailyBriefs.$inferSelect;
 export type InsertDailyBrief = typeof dailyBriefs.$inferInsert;
+
+// ─── Meta OAuth pending sessions ─────────────────────────────────────────────
+// Stores the long-lived token + ad accounts list temporarily after the OAuth
+// callback so the user can pick which account to connect.
+// Rows are deleted after the user confirms or after TTL (10 minutes).
+export const metaOAuthSessions = mysqlTable(
+  "meta_oauth_sessions",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),            // random hex token
+    userId: int("userId").notNull(),
+    workspaceId: int("workspaceId").notNull(),
+    longLivedToken: text("longLivedToken").notNull(),
+    adAccountsJson: text("adAccountsJson").notNull(),          // JSON array
+    expiresAt: timestamp("expiresAt").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_meta_session_user").on(t.userId),
+  ],
+);
+
+export type MetaOAuthSession = typeof metaOAuthSessions.$inferSelect;
