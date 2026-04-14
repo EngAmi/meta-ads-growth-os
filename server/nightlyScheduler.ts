@@ -56,7 +56,7 @@ export function resolveCronSchedule(): string {
 
 // ─── Failure notification helper ──────────────────────────────────────────────
 
-async function notifyFailure(params: {
+export async function notifyFailure(params: {
   workspaceId: number;
   runId?: string;
   summary: string;
@@ -81,7 +81,7 @@ async function notifyFailure(params: {
 
 // ─── Main runner ──────────────────────────────────────────────────────────────
 
-async function runNightlyPipelines(): Promise<void> {
+export async function runNightlyPipelines(): Promise<void> {
   console.log("[nightly-cron] Starting nightly pipeline run");
 
   const db = await getDb();
