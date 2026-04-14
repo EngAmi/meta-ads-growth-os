@@ -160,4 +160,42 @@ export const dataSourcesRouter = router({
 
     return rows[0] ?? null;
   }),
+
+  /**
+   * Return the last 20 cron-triggered pipeline runs for the workspace.
+   * Used by the Scheduled Runs tab on the Data Sources page.
+   */
+  scheduledRuns: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(100).default(20) }).optional())
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return [];
+
+      const workspaceId = await resolveWorkspaceId(ctx.user.id, ctx.user.name);
+
+      const rows = await db
+        .select({
+          id: pipelineRuns.id,
+          runId: pipelineRuns.runId,
+          status: pipelineRuns.status,
+          trigger: pipelineRuns.trigger,
+          startedAt: pipelineRuns.startedAt,
+          endedAt: pipelineRuns.endedAt,
+          durationMs: pipelineRuns.durationMs,
+          stepsCompleted: pipelineRuns.stepsCompleted,
+          stepErrors: pipelineRuns.stepErrors,
+          stepResults: pipelineRuns.stepResults,
+        })
+        .from(pipelineRuns)
+        .where(
+          and(
+            eq(pipelineRuns.workspaceId, workspaceId),
+            eq(pipelineRuns.trigger, "cron"),
+          ),
+        )
+        .orderBy(desc(pipelineRuns.startedAt))
+        .limit(input?.limit ?? 20);
+
+      return rows;
+    }),
 });

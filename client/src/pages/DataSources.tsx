@@ -13,7 +13,7 @@ import {
   Plug, Upload, RefreshCw, Trash2, CheckCircle2, XCircle,
   AlertCircle, Clock, FileSpreadsheet, CloudUpload, Eye,
   ChevronRight, Loader2, Wifi, WifiOff, Info, MessageCircle,
-  Copy, Shield, CheckCheck, ExternalLink
+  Copy, Shield, CheckCheck, ExternalLink, CalendarClock
 } from "lucide-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -857,6 +857,96 @@ function WhatsAppTab() {
   );
 }
 
+// ─── Scheduled Runs Tab ──────────────────────────────────────────────────────
+function RunStatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+    completed: { label: "Completed", color: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30", icon: <CheckCircle2 className="w-3 h-3" /> },
+    partial:   { label: "Partial",   color: "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",  icon: <AlertCircle className="w-3 h-3" /> },
+    failed:    { label: "Failed",    color: "text-red-400 bg-red-400/10 border-red-400/30",           icon: <XCircle className="w-3 h-3" /> },
+    running:   { label: "Running",   color: "text-blue-400 bg-blue-400/10 border-blue-400/30",        icon: <Loader2 className="w-3 h-3 animate-spin" /> },
+  };
+  const s = map[status] || map.running;
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${s.color}`}>
+      {s.icon}{s.label}
+    </span>
+  );
+}
+
+function formatDuration(ms: number | null | undefined): string {
+  if (!ms) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
+}
+
+function ScheduledRunsTab() {
+  const { data: runs = [], isLoading } = trpc.engineDataSources.scheduledRuns.useQuery({});
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-slate-400">
+        <Loader2 className="w-6 h-6 animate-spin mr-2" />
+        <span className="text-sm">Loading scheduled runs…</span>
+      </div>
+    );
+  }
+
+  if (runs.length === 0) {
+    return (
+      <div className="text-center py-16 text-slate-500">
+        <CalendarClock className="w-12 h-12 mx-auto mb-3 opacity-30" />
+        <p className="text-base font-medium text-slate-400">No scheduled runs yet</p>
+        <p className="text-sm mt-1 text-slate-500">
+          The nightly pipeline runs automatically at midnight. Check back after the first scheduled run.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {runs.map((run: any) => {
+        const errors = run.stepErrors as Record<string, string> | null;
+        const errorEntries = errors ? Object.entries(errors) : [];
+        const shortId = run.runId.slice(0, 8);
+        const startedAt = run.startedAt ? new Date(run.startedAt).toLocaleString() : "—";
+        return (
+          <div key={run.id} className="rounded-xl bg-slate-800/40 border border-slate-700/50 overflow-hidden">
+            {/* Header row */}
+            <div className="flex items-center justify-between px-4 py-3">
+              <div className="flex items-center gap-3">
+                <CalendarClock className="w-4 h-4 text-slate-400 shrink-0" />
+                <div>
+                  <span className="text-xs font-mono text-slate-300">{shortId}</span>
+                  <span className="text-xs text-slate-500 ml-2">{startedAt}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400">{run.stepsCompleted}/6 steps</span>
+                <span className="text-xs text-slate-500">{formatDuration(run.durationMs)}</span>
+                <RunStatusBadge status={run.status} />
+              </div>
+            </div>
+            {/* Step errors (only if present) */}
+            {errorEntries.length > 0 && (
+              <div className="border-t border-slate-700/50 px-4 py-3 space-y-1">
+                <p className="text-xs font-medium text-red-400 uppercase tracking-wider mb-2">Step Errors</p>
+                {errorEntries.map(([step, msg]) => (
+                  <div key={step} className="flex gap-2 text-xs">
+                    <span className="text-slate-400 font-mono shrink-0">{step}:</span>
+                    <span className="text-red-300 break-all">{msg}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function DataSources() {
   const { refetch } = trpc.dataSources.listConnections.useQuery();
@@ -903,6 +993,9 @@ export default function DataSources() {
             </TabsTrigger>
             <TabsTrigger value="whatsapp" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white text-slate-400 gap-2">
               <MessageCircle className="w-4 h-4" /> WhatsApp Leads
+            </TabsTrigger>
+            <TabsTrigger value="scheduled" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white text-slate-400 gap-2">
+              <CalendarClock className="w-4 h-4" /> Scheduled Runs
             </TabsTrigger>
           </TabsList>
 
@@ -988,6 +1081,24 @@ export default function DataSources() {
 
           <TabsContent value="whatsapp">
             <WhatsAppTab />
+          </TabsContent>
+
+          <TabsContent value="scheduled">
+            <Card className="bg-slate-900/50 border-slate-700/50">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <CalendarClock className="w-5 h-5 text-violet-400" />
+                  Scheduled Runs
+                </CardTitle>
+                <CardDescription className="text-slate-400">
+                  History of nightly cron-triggered pipeline runs. The pipeline runs automatically at midnight
+                  for each workspace with an active integration.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ScheduledRunsTab />
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>
