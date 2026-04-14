@@ -21,12 +21,17 @@
  * the workspace owner is notified via notifyOwner(). Notification failures are
  * logged but do not affect the scheduler's own error handling.
  *
+ * ─── Token management ─────────────────────────────────────────────────────────
+ * Before each run:
+ *   • Tokens expiring within 14 days are automatically extended via Meta Graph API.
+ *   • Tokens expiring within 7 days (and failed to auto-renew) trigger an owner alert.
+ *
  * This module does NOT affect manual "Sync Now" behaviour — runPipeline() is called
  * directly and the trigger is set to 'cron' so runs are distinguishable in the DB.
  */
 
 import cron from "node-cron";
-import { and, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, lte } from "drizzle-orm";
 import { getDb } from "./db";
 import { integrations, metaOAuthSessions, pipelineRuns } from "../drizzle/schema";
 import { runPipeline } from "./engines/pipeline";
@@ -35,6 +40,8 @@ import { notifyOwner } from "./_core/notification";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TWENTY_HOURS_MS = 20 * 60 * 60 * 1000;
+const SEVEN_DAYS_MS   = 7  * 24 * 60 * 60 * 1000;
+const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
 
 /**
  * Cron expression read from CRON_SCHEDULE env var.
@@ -79,6 +86,111 @@ export async function notifyFailure(params: {
   }
 }
 
+// ─── Meta token helpers ───────────────────────────────────────────────────────
+
+/**
+ * Attempt to extend a Meta long-lived token via the Graph API.
+ * Returns the new token string on success, or null on failure.
+ */
+async function extendMetaToken(accessToken: string): Promise<string | null> {
+  const appId     = process.env.META_APP_ID;
+  const appSecret = process.env.META_APP_SECRET;
+  // Skip if credentials are placeholder values
+  if (!appId || !appSecret || appId === "000" || appSecret === "00") return null;
+  try {
+    const url = new URL("https://graph.facebook.com/v19.0/oauth/access_token");
+    url.searchParams.set("grant_type",       "fb_exchange_token");
+    url.searchParams.set("client_id",        appId);
+    url.searchParams.set("client_secret",    appSecret);
+    url.searchParams.set("fb_exchange_token", accessToken);
+    const res = await fetch(url.toString());
+    if (!res.ok) return null;
+    const json = await res.json() as { access_token?: string };
+    return json.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check all active integrations for expiring tokens.
+ * - Tokens expiring within 14 days → attempt auto-renew via Meta Graph API.
+ * - Tokens expiring within 7 days (and failed to auto-renew) → notify owner.
+ */
+async function manageExpiringTokens(): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  const now           = new Date();
+  const in14Days      = new Date(now.getTime() + FOURTEEN_DAYS_MS);
+
+  // Find all active integrations with tokens expiring within 14 days
+  const expiring = await db
+    .select({
+      id:             integrations.id,
+      workspaceId:    integrations.workspaceId,
+      accessToken:    integrations.accessToken,
+      tokenExpiresAt: integrations.tokenExpiresAt,
+      accountName:    integrations.accountName,
+      metaAccountId:  integrations.metaAccountId,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.status, "active"),
+        lte(integrations.tokenExpiresAt, in14Days),
+      )
+    );
+
+  if (expiring.length === 0) return;
+
+  console.log(`[nightly-cron] Found ${expiring.length} integration(s) with tokens expiring within 14 days`);
+
+  for (const intg of expiring) {
+    const expiresAt  = intg.tokenExpiresAt ? new Date(intg.tokenExpiresAt) : null;
+    const daysLeft   = expiresAt
+      ? Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+      : 0;
+    const label      = intg.accountName ?? `act_${intg.metaAccountId}`;
+
+    // Attempt auto-renew
+    const newToken = await extendMetaToken(intg.accessToken);
+    if (newToken) {
+      const newExpiry = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000); // 60 days
+      await db
+        .update(integrations)
+        .set({ accessToken: newToken, tokenExpiresAt: newExpiry, updatedAt: new Date() })
+        .where(eq(integrations.id, intg.id));
+      console.log(
+        `[nightly-cron] workspace=${intg.workspaceId} — token auto-renewed for "${label}" ` +
+        `(was ${daysLeft}d left, new expiry ${newExpiry.toISOString().slice(0, 10)})`
+      );
+    } else if (daysLeft <= 7) {
+      // Auto-renew failed and token expires within 7 days — alert owner
+      console.warn(
+        `[nightly-cron] workspace=${intg.workspaceId} — token for "${label}" expires in ${daysLeft}d, auto-renew failed`
+      );
+      try {
+        await notifyOwner({
+          title: `[Growth OS] Meta Ads token expiring in ${daysLeft}d — workspace ${intg.workspaceId}`,
+          content:
+            `The Meta Ads access token for account "${label}" (workspace ${intg.workspaceId}) ` +
+            `will expire in ${daysLeft} day${daysLeft === 1 ? "" : "s"}.\n\n` +
+            `Automatic renewal failed. Please reconnect via Data Sources → Meta Ads API → Continue with Facebook ` +
+            `to avoid interruption to your nightly data sync.`,
+        });
+      } catch (notifyErr) {
+        console.error(`[nightly-cron] Failed to send token expiry notification`, notifyErr);
+      }
+    } else {
+      console.log(
+        `[nightly-cron] workspace=${intg.workspaceId} — token for "${label}" expires in ${daysLeft}d, ` +
+        `auto-renew skipped (credentials not configured)`
+      );
+    }
+  }
+}
+
 // ─── Main runner ──────────────────────────────────────────────────────────────
 
 export async function runNightlyPipelines(): Promise<void> {
@@ -89,6 +201,9 @@ export async function runNightlyPipelines(): Promise<void> {
     console.error("[nightly-cron] Database unavailable — aborting");
     return;
   }
+
+  // 0. Manage expiring tokens (auto-renew + notify)
+  await manageExpiringTokens();
 
   // 1. Fetch all workspaces with at least one active integration
   const activeIntegrations = await db

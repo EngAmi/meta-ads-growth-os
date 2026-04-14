@@ -189,7 +189,11 @@ describe("runNightlyPipelines — duplicate-run guard", () => {
     recentRunWorkspaceIds: number[];
   }) {
     // Each .select().from().where() chain returns the configured rows.
-    // We distinguish the two queries by call order.
+    // Call order:
+    //   1 → manageExpiringTokens: expiring integrations (always [] in unit tests)
+    //   2 → active integrations query
+    //   3 → recent runs query
+    // The delete chain (OAuth session cleanup) is handled separately.
     let callCount = 0;
     const queryChain = {
       select: vi.fn().mockReturnThis(),
@@ -197,12 +201,18 @@ describe("runNightlyPipelines — duplicate-run guard", () => {
       where: vi.fn().mockImplementation(() => {
         callCount++;
         if (callCount === 1) {
-          // First call: active integrations query
+          // manageExpiringTokens: no expiring tokens in unit tests
+          return Promise.resolve([]);
+        }
+        if (callCount === 2) {
+          // active integrations query
           return Promise.resolve(activeWorkspaceIds.map(id => ({ workspaceId: id })));
         }
-        // Second call: recent runs query
+        // callCount >= 3: recent runs query (and any subsequent cleanup queries)
         return Promise.resolve(recentRunWorkspaceIds.map(id => ({ workspaceId: id })));
       }),
+      // delete chain for OAuth session cleanup — returns affectedRows: 0
+      delete: vi.fn().mockReturnThis(),
     };
     return queryChain;
   }
