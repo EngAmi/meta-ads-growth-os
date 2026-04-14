@@ -2,8 +2,8 @@
  * Meta (Facebook) OAuth Routes
  *
  * GET /api/meta/oauth/start
+ *   Requires an authenticated Growth OS session (app_session_id cookie).
  *   Builds the Facebook OAuth dialog URL and redirects the browser to it.
- *   Requires the user to be authenticated (session cookie must be present).
  *   Stores a CSRF state token in a short-lived cookie.
  *
  * GET /api/meta/oauth/callback
@@ -20,7 +20,6 @@ import { getDb } from "./db";
 import { integrations, workspaces } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { sdk } from "./_core/sdk";
-import { COOKIE_NAME } from "@shared/const";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,6 +39,16 @@ const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 function getQueryParam(req: Request, key: string): string | undefined {
   const v = req.query[key];
   return typeof v === "string" ? v : undefined;
+}
+
+/**
+ * Derive the public origin from the request headers.
+ * Works behind the Manus reverse proxy (x-forwarded-host) and locally.
+ */
+function getOrigin(req: Request): string {
+  const host = req.headers["x-forwarded-host"] ?? req.headers.host;
+  const proto = (req.headers["x-forwarded-proto"] as string | undefined) ?? req.protocol;
+  return `${proto}://${host}`;
 }
 
 /** Resolve the workspace ID for the authenticated user, auto-creating if needed. */
@@ -112,9 +121,12 @@ export function registerMetaOAuthRoutes(app: Express) {
    * Meta app's Facebook Login → Valid OAuth Redirect URIs list.
    */
   app.get("/api/meta/oauth/start", async (req: Request, res: Response) => {
-    // Require an authenticated session
-    const sessionCookie = req.cookies?.[COOKIE_NAME];
-    if (!sessionCookie) {
+    // Authenticate via the same mechanism as tRPC protectedProcedure
+    let user;
+    try {
+      user = await sdk.authenticateRequest(req);
+    } catch {
+      // Not logged in — redirect to Manus login, then back to data sources
       res.redirect(302, "/login?next=/data-sources");
       return;
     }
@@ -133,10 +145,7 @@ export function registerMetaOAuthRoutes(app: Express) {
       secure: ENV.isProduction,
     });
 
-    // Build the redirect_uri — must be the production domain when deployed
-    const origin = req.headers["x-forwarded-host"]
-      ? `${req.protocol}://${req.headers["x-forwarded-host"]}`
-      : `${req.protocol}://${req.headers.host}`;
+    const origin = getOrigin(req);
     const redirectUri = `${origin}/api/meta/oauth/callback`;
 
     const dialogUrl = new URL("https://www.facebook.com/v19.0/dialog/oauth");
@@ -146,6 +155,7 @@ export function registerMetaOAuthRoutes(app: Express) {
     dialogUrl.searchParams.set("state", state);
     dialogUrl.searchParams.set("response_type", "code");
 
+    console.log(`[Meta OAuth] Starting OAuth for user ${user.id}, redirect_uri=${redirectUri}`);
     res.redirect(302, dialogUrl.toString());
   });
 
@@ -173,48 +183,23 @@ export function registerMetaOAuthRoutes(app: Express) {
     // CSRF check
     const storedState = req.cookies?.[STATE_COOKIE];
     if (!storedState || storedState !== state) {
-      console.error("[Meta OAuth] State mismatch");
+      console.error("[Meta OAuth] State mismatch — possible CSRF attempt");
       res.redirect(302, "/data-sources?meta_error=state_mismatch");
       return;
     }
     res.clearCookie(STATE_COOKIE);
 
-    // Require an authenticated session to associate the integration with a user
-    const sessionCookie = req.cookies?.[COOKIE_NAME];
-    if (!sessionCookie) {
+    // Authenticate via the same mechanism as tRPC protectedProcedure
+    let user;
+    try {
+      user = await sdk.authenticateRequest(req);
+    } catch {
       res.redirect(302, "/login?next=/data-sources");
       return;
     }
 
     try {
-      // Identify the logged-in user from the session cookie
-      const userInfo = await sdk.getUserInfo(sessionCookie).catch(() => null);
-      if (!userInfo?.openId) {
-        res.redirect(302, "/login?next=/data-sources");
-        return;
-      }
-
-      const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
-
-      // Look up the user row
-      const { users } = await import("../drizzle/schema");
-      const userRows = await db
-        .select({ id: users.id, name: users.name })
-        .from(users)
-        .where(eq(users.openId, userInfo.openId))
-        .limit(1);
-
-      if (userRows.length === 0) {
-        res.redirect(302, "/data-sources?meta_error=user_not_found");
-        return;
-      }
-      const user = userRows[0];
-
-      // Build the redirect_uri (must match what was sent in /start)
-      const origin = req.headers["x-forwarded-host"]
-        ? `${req.protocol}://${req.headers["x-forwarded-host"]}`
-        : `${req.protocol}://${req.headers.host}`;
+      const origin = getOrigin(req);
       const redirectUri = `${origin}/api/meta/oauth/callback`;
 
       // Exchange authorisation code for short-lived token
@@ -239,16 +224,20 @@ export function registerMetaOAuthRoutes(app: Express) {
       // Exchange for 60-day long-lived token
       const longLivedToken = await exchangeForLongLivedToken(tokenData.access_token);
 
-      // Fetch ad accounts
+      // Fetch ad accounts accessible by this token
       const adAccounts = await fetchAdAccounts(longLivedToken);
 
-      // Resolve or create workspace
+      // Resolve or create workspace for this user
       const workspaceId = await resolveWorkspaceId(user.id, user.name);
 
-      // Upsert one integration row per ad account
-      // If the user has multiple accounts, save the first one; they can add more via the manual form
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+
+      // Save the first ad account (user can add more via the manual form)
       const primaryAccount = adAccounts[0];
-      const accountId = primaryAccount?.account_id ?? primaryAccount?.id?.replace("act_", "") ?? "unknown";
+      const accountId = primaryAccount?.account_id
+        ?? primaryAccount?.id?.replace("act_", "")
+        ?? "unknown";
 
       // Check if an integration for this account already exists
       const existing = await db
@@ -264,7 +253,6 @@ export function registerMetaOAuthRoutes(app: Express) {
         .limit(1);
 
       if (existing.length > 0) {
-        // Update the token on the existing row
         await db
           .update(integrations)
           .set({
@@ -283,7 +271,7 @@ export function registerMetaOAuthRoutes(app: Express) {
         });
       }
 
-      console.log(`[Meta OAuth] Integration saved for workspace ${workspaceId}, account ${accountId}`);
+      console.log(`[Meta OAuth] Integration saved — workspace ${workspaceId}, account ${accountId}, user ${user.id}`);
       res.redirect(302, "/data-sources?meta_connected=1");
     } catch (err) {
       console.error("[Meta OAuth] Callback error:", err);
