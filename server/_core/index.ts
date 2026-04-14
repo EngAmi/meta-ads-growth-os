@@ -10,6 +10,7 @@ import { serveStatic, setupVite } from "./vite";
 import { registerUploadRoutes } from "../uploadRoute";
 import { registerWhatsAppWebhook } from "../whatsappWebhook";
 import { registerMetaOAuthRoutes } from "../metaOAuth";
+import { registerNightlyScheduler } from "../nightlyScheduler";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -69,6 +70,9 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+
+  // Register nightly pipeline scheduler (runs at 00:00 daily)
+  registerNightlyScheduler();
 }
 
 startServer().catch(console.error);
