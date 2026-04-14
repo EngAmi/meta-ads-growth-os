@@ -21,10 +21,10 @@ The system is built around a single principle: **no more manual exports**. Conne
 ## Screenshots
 
 ### Executive Dashboard
-![Executive Dashboard — KPI cards, funnel flow, revenue vs. spend chart, and country breakdown](https://d2xsxph8kpxj0f.cloudfront.net/98687482/C9E7CmbrLx7K7Hw6aufPcP/screenshot-dashboard_e36ed1ca.png)
+![Executive Dashboard — KPI cards, funnel flow, revenue vs. spend chart, and country breakdown](docs/images/dashboard.png)
 
 ### Data Sources — Meta Ads API Connection
-![Data Sources — Facebook OAuth, manual token form, engine integrations, and saved connections](https://d2xsxph8kpxj0f.cloudfront.net/98687482/C9E7CmbrLx7K7Hw6aufPcP/screenshot-datasources_a86a4790.png)
+![Data Sources — Facebook OAuth, manual token form, engine integrations, and saved connections](docs/images/datasources.png)
 
 ---
 
