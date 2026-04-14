@@ -209,10 +209,19 @@ function toDateString(d: Date): string {
 }
 
 /**
- * Parse a "YYYY-MM-DD" string into a UTC midnight Date.
- * Drizzle's `date` column type expects a Date object.
+ * Parse a date value into a UTC midnight Date.
+ * Accepts:
+ *   - ISO string  "YYYY-MM-DD"  → parsed directly
+ *   - Numeric string or number   → treated as Excel serial date
+ *     (Excel epoch: 1899-12-30, serial 1 = 1900-01-01)
  */
-function parseDate(s: string): Date {
+function parseDate(s: string | number): Date {
+  const n = typeof s === "number" ? s : Number(s);
+  if (!isNaN(n) && !/^\d{4}-/.test(String(s))) {
+    // Excel serial date: days since 1899-12-30
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    return new Date(excelEpoch.getTime() + n * 86_400_000);
+  }
   return new Date(`${s}T00:00:00.000Z`);
 }
 
