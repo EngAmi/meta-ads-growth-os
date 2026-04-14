@@ -9,6 +9,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { registerUploadRoutes } from "../uploadRoute";
 import { registerWhatsAppWebhook } from "../whatsappWebhook";
+import { registerMetaOAuthRoutes } from "../metaOAuth";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -41,6 +42,8 @@ async function startServer() {
   registerUploadRoutes(app);
   // WhatsApp webhook for real-time lead capture
   registerWhatsAppWebhook(app);
+  // Meta (Facebook) OAuth routes
+  registerMetaOAuthRoutes(app);
   // tRPC API
   app.use(
     "/api/trpc",

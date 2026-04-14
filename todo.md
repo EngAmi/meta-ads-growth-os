@@ -86,3 +86,12 @@
 - [x] Frontend: auto-selects account if only one is found
 - [x] Frontend: green confirmation strip shows selected account before saving
 - [x] Frontend: token change resets the picker so user must re-fetch
+
+## Meta OAuth Connector (Facebook Login Button)
+- [x] Add META_APP_ID and META_APP_SECRET secrets
+- [x] Add VITE_META_APP_ID secret for frontend
+- [x] Backend: GET /api/meta/oauth/start — build and redirect to Meta OAuth dialog URL
+- [x] Backend: GET /api/meta/oauth/callback — exchange code for short-lived token, then long-lived token, fetch ad accounts, save integration
+- [x] Frontend: "Connect with Facebook" button on DataSources page
+- [x] Frontend: meta_connected / meta_error query param handling on redirect back to /data-sources
+- [x] Vitest credential validation test (25 tests passing)

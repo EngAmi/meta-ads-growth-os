@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -71,6 +71,27 @@ function CopyButton({ text }: { text: string }) {
     <button onClick={handleCopy}
       className="ml-2 p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 transition-colors">
       {copied ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+    </button>
+  );
+}
+
+// ─── Facebook OAuth Button ───────────────────────────────────────────────────
+function FacebookOAuthButton() {
+  const handleConnect = () => {
+    // Redirect to the backend /start endpoint which builds the Facebook dialog URL
+    window.location.href = "/api/meta/oauth/start";
+  };
+
+  return (
+    <button
+      onClick={handleConnect}
+      className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl bg-[#1877F2] hover:bg-[#1664d8] active:bg-[#1558c0] text-white font-semibold text-sm transition-colors shadow-lg shadow-blue-500/20"
+    >
+      {/* Official Facebook logo */}
+      <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white shrink-0">
+        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+      </svg>
+      Continue with Facebook
     </button>
   );
 }
@@ -840,6 +861,28 @@ function WhatsAppTab() {
 export default function DataSources() {
   const { refetch } = trpc.dataSources.listConnections.useQuery();
 
+  // Handle OAuth redirect result query params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("meta_connected");
+    const error = params.get("meta_error");
+    if (connected === "1") {
+      toast.success("Meta Ads connected via Facebook — your ad account is now linked.");
+      refetch();
+      // Clean the URL without a page reload
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (error) {
+      const msg = decodeURIComponent(error);
+      if (msg === "denied") {
+        toast.warning("Facebook connection cancelled — no changes were made.");
+      } else {
+        toast.error(`Facebook connection failed: ${msg}`);
+      }
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6 max-w-5xl mx-auto">
@@ -878,7 +921,27 @@ export default function DataSources() {
                   Connect directly to Meta Graph API using your access token to automatically sync campaign data.
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-6">
+                {/* Primary: Facebook OAuth button */}
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-400">
+                    The fastest way to connect — log in with Facebook and select your ad account.
+                    No token copying required.
+                  </p>
+                  <FacebookOAuthButton />
+                </div>
+
+                {/* Divider */}
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-slate-700" />
+                  </div>
+                  <div className="relative flex justify-center">
+                    <span className="px-3 text-xs text-slate-500 bg-slate-900">or connect manually with a token</span>
+                  </div>
+                </div>
+
+                {/* Fallback: manual token form */}
                 <MetaConnectionForm onSaved={refetch} />
               </CardContent>
             </Card>
