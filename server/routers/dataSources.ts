@@ -10,7 +10,7 @@
  */
 
 import { z } from "zod";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
@@ -163,15 +163,32 @@ export const dataSourcesRouter = router({
 
   /**
    * Return the last 20 cron-triggered pipeline runs for the workspace.
+   * Optionally filtered by status (all | running | completed | failed | partial).
    * Used by the Scheduled Runs tab on the Data Sources page.
    */
   scheduledRuns: protectedProcedure
-    .input(z.object({ limit: z.number().int().min(1).max(100).default(20) }).optional())
+    .input(
+      z.object({
+        limit: z.number().int().min(1).max(100).default(20),
+        status: z.enum(["all", "running", "completed", "failed", "partial"]).default("all"),
+      }).optional(),
+    )
     .query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) return [];
 
       const workspaceId = await resolveWorkspaceId(ctx.user.id, ctx.user.name);
+
+      const statusFilter = input?.status ?? "all";
+      const conditions: SQL[] = [
+        eq(pipelineRuns.workspaceId, workspaceId),
+        eq(pipelineRuns.trigger, "cron"),
+      ];
+      if (statusFilter !== "all") {
+        conditions.push(
+          eq(pipelineRuns.status, statusFilter as "running" | "completed" | "failed" | "partial"),
+        );
+      }
 
       const rows = await db
         .select({
@@ -187,12 +204,7 @@ export const dataSourcesRouter = router({
           stepResults: pipelineRuns.stepResults,
         })
         .from(pipelineRuns)
-        .where(
-          and(
-            eq(pipelineRuns.workspaceId, workspaceId),
-            eq(pipelineRuns.trigger, "cron"),
-          ),
-        )
+        .where(and(...conditions))
         .orderBy(desc(pipelineRuns.startedAt))
         .limit(input?.limit ?? 20);
 

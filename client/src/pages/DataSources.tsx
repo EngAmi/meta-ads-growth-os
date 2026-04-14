@@ -942,8 +942,20 @@ function StepResultsPanel({ stepResults, stepErrors }: {
   );
 }
 
+const STATUS_OPTIONS = [
+  { value: "all",       label: "All" },
+  { value: "completed", label: "Completed" },
+  { value: "failed",    label: "Failed" },
+  { value: "partial",   label: "Partial" },
+  { value: "running",   label: "Running" },
+] as const;
+
+type RunStatus = typeof STATUS_OPTIONS[number]["value"];
+
 function ScheduledRunsTab() {
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<RunStatus>("all");
+
   const toggleExpand = (id: string) =>
     setExpandedRuns(prev => {
       const next = new Set(prev);
@@ -952,7 +964,7 @@ function ScheduledRunsTab() {
     });
 
   const { data: runs = [], isLoading } = trpc.engineDataSources.scheduledRuns.useQuery(
-    {},
+    { status: statusFilter },
     { refetchInterval: 60_000 }
   );
 
@@ -965,20 +977,41 @@ function ScheduledRunsTab() {
     );
   }
 
-  if (runs.length === 0) {
-    return (
-      <div className="text-center py-16 text-slate-500">
-        <CalendarClock className="w-12 h-12 mx-auto mb-3 opacity-30" />
-        <p className="text-base font-medium text-slate-400">No scheduled runs yet</p>
-        <p className="text-sm mt-1 text-slate-500">
-          The nightly pipeline runs automatically at midnight. Check back after the first scheduled run.
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-3">
+      {/* Status filter */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {STATUS_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => setStatusFilter(opt.value)}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              statusFilter === opt.value
+                ? "bg-violet-600 border-violet-500 text-white"
+                : "bg-slate-800/60 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {runs.length === 0 && (
+        <div className="text-center py-16 text-slate-500">
+          <CalendarClock className="w-12 h-12 mx-auto mb-3 opacity-30" />
+          {statusFilter === "all" ? (
+            <>
+              <p className="text-base font-medium text-slate-400">No scheduled runs yet</p>
+              <p className="text-sm mt-1 text-slate-500">
+                The nightly pipeline runs automatically at midnight. Check back after the first scheduled run.
+              </p>
+            </>
+          ) : (
+            <p className="text-base font-medium text-slate-400">No {statusFilter} runs found</p>
+          )}
+        </div>
+      )}
+
       {runs.map((run: any) => {
         const errors = run.stepErrors as Record<string, string> | null;
         const errorEntries = errors ? Object.entries(errors) : [];
