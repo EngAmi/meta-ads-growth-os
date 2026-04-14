@@ -9,33 +9,14 @@
 
 import { z } from "zod";
 import { eq, and, gte, desc, sql } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
 import {
-  workspaces,
   engineCampaigns,
   engineAdSets,
   dailyMetrics,
 } from "../../drizzle/schema";
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
-
-async function resolveWorkspaceId(userId: number): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-
-  const rows = await db
-    .select({ id: workspaces.id })
-    .from(workspaces)
-    .where(eq(workspaces.ownerId, userId))
-    .limit(1);
-
-  if (rows.length === 0) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
-  }
-  return rows[0].id;
-}
+import { resolveOrCreateWorkspace } from "./_workspace";
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -47,7 +28,7 @@ export const adsRouter = router({
     const db = await getDb();
     if (!db) return [];
 
-    const workspaceId = await resolveWorkspaceId(ctx.user.id);
+    const workspaceId = await resolveOrCreateWorkspace(ctx.user.id, ctx.user.name);
 
     const campaigns = await db
       .select()
@@ -105,7 +86,7 @@ export const adsRouter = router({
     const db = await getDb();
     if (!db) return [];
 
-    const workspaceId = await resolveWorkspaceId(ctx.user.id);
+    const workspaceId = await resolveOrCreateWorkspace(ctx.user.id, ctx.user.name);
 
     const adSets = await db
       .select()
@@ -169,7 +150,7 @@ export const adsRouter = router({
       const db = await getDb();
       if (!db) return [];
 
-      const workspaceId = await resolveWorkspaceId(ctx.user.id);
+      const workspaceId = await resolveOrCreateWorkspace(ctx.user.id, ctx.user.name);
 
       return db
         .select()

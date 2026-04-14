@@ -9,28 +9,10 @@
  */
 
 import { eq, desc } from "drizzle-orm";
-import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
-import { workspaces, dailyBriefs, pipelineRuns } from "../../drizzle/schema";
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
-
-async function resolveWorkspaceId(userId: number): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-
-  const rows = await db
-    .select({ id: workspaces.id })
-    .from(workspaces)
-    .where(eq(workspaces.ownerId, userId))
-    .limit(1);
-
-  if (rows.length === 0) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
-  }
-  return rows[0].id;
-}
+import { dailyBriefs, pipelineRuns } from "../../drizzle/schema";
+import { resolveOrCreateWorkspace } from "./_workspace";
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -43,7 +25,7 @@ export const dashboardRouter = router({
     const db = await getDb();
     if (!db) return null;
 
-    const workspaceId = await resolveWorkspaceId(ctx.user.id);
+    const workspaceId = await resolveOrCreateWorkspace(ctx.user.id, ctx.user.name);
 
     const rows = await db
       .select()
@@ -63,7 +45,7 @@ export const dashboardRouter = router({
     const db = await getDb();
     if (!db) return null;
 
-    const workspaceId = await resolveWorkspaceId(ctx.user.id);
+    const workspaceId = await resolveOrCreateWorkspace(ctx.user.id, ctx.user.name);
 
     const rows = await db
       .select({ funnelHealth: dailyBriefs.funnelHealth })
@@ -89,7 +71,7 @@ export const dashboardRouter = router({
     const db = await getDb();
     if (!db) return null;
 
-    const workspaceId = await resolveWorkspaceId(ctx.user.id);
+    const workspaceId = await resolveOrCreateWorkspace(ctx.user.id, ctx.user.name);
 
     const rows = await db
       .select({ kpis: dailyBriefs.kpis })
@@ -116,7 +98,7 @@ export const dashboardRouter = router({
     const db = await getDb();
     if (!db) return [];
 
-    const workspaceId = await resolveWorkspaceId(ctx.user.id);
+    const workspaceId = await resolveOrCreateWorkspace(ctx.user.id, ctx.user.name);
 
     return db
       .select({

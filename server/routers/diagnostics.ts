@@ -11,25 +11,8 @@ import { eq, and, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
-import { workspaces, engineDiagnostics } from "../../drizzle/schema";
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
-
-async function resolveWorkspaceId(userId: number): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-
-  const rows = await db
-    .select({ id: workspaces.id })
-    .from(workspaces)
-    .where(eq(workspaces.ownerId, userId))
-    .limit(1);
-
-  if (rows.length === 0) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
-  }
-  return rows[0].id;
-}
+import { engineDiagnostics } from "../../drizzle/schema";
+import { resolveOrCreateWorkspace } from "./_workspace";
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -52,7 +35,7 @@ export const diagnosticsRouter = router({
       const db = await getDb();
       if (!db) return { data: [], total: 0 };
 
-      const workspaceId = await resolveWorkspaceId(ctx.user.id);
+      const workspaceId = await resolveOrCreateWorkspace(ctx.user.id, ctx.user.name);
 
       const conditions = [
         eq(engineDiagnostics.workspaceId, workspaceId),
@@ -93,7 +76,7 @@ export const diagnosticsRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 
-      const workspaceId = await resolveWorkspaceId(ctx.user.id);
+      const workspaceId = await resolveOrCreateWorkspace(ctx.user.id, ctx.user.name);
 
       // Verify ownership
       const rows = await db

@@ -14,27 +14,14 @@ import { eq, and, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
-import { workspaces, integrations, pipelineRuns } from "../../drizzle/schema";
+import { integrations, pipelineRuns } from "../../drizzle/schema";
 import { runPipeline } from "../engines/pipeline";
+import { resolveOrCreateWorkspace } from "./_workspace";
 
-// ─── Helper: resolve workspaceId for the authenticated user ──────────────────
+// ─── Helper alias ─────────────────────────────────────────────────────────────
 
-async function resolveWorkspaceId(userId: number): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-
-  const rows = await db
-    .select({ id: workspaces.id })
-    .from(workspaces)
-    .where(eq(workspaces.ownerId, userId))
-    .limit(1);
-
-  if (rows.length === 0) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found. Call workspace.mine first." });
-  }
-
-  return rows[0].id;
-}
+const resolveWorkspaceId = (userId: number, userName?: string | null) =>
+  resolveOrCreateWorkspace(userId, userName);
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -46,7 +33,7 @@ export const dataSourcesRouter = router({
     const db = await getDb();
     if (!db) return [];
 
-    const workspaceId = await resolveWorkspaceId(ctx.user.id);
+    const workspaceId = await resolveWorkspaceId(ctx.user.id, ctx.user.name);
 
     return db
       .select({
@@ -80,7 +67,7 @@ export const dataSourcesRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 
-      const workspaceId = await resolveWorkspaceId(ctx.user.id);
+      const workspaceId = await resolveWorkspaceId(ctx.user.id, ctx.user.name);
 
       await db
         .insert(integrations)
@@ -113,7 +100,7 @@ export const dataSourcesRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
 
-      const workspaceId = await resolveWorkspaceId(ctx.user.id);
+      const workspaceId = await resolveWorkspaceId(ctx.user.id, ctx.user.name);
 
       // Verify the integration belongs to this workspace
       const rows = await db
@@ -143,7 +130,7 @@ export const dataSourcesRouter = router({
    * Returns the runId, status, and stepsCompleted so the UI can poll runStatus.
    */
   syncNow: protectedProcedure.mutation(async ({ ctx }) => {
-    const workspaceId = await resolveWorkspaceId(ctx.user.id);
+    const workspaceId = await resolveWorkspaceId(ctx.user.id, ctx.user.name);
 
     const result = await runPipeline({ workspaceId, trigger: "manual" });
 
@@ -162,7 +149,7 @@ export const dataSourcesRouter = router({
     const db = await getDb();
     if (!db) return null;
 
-    const workspaceId = await resolveWorkspaceId(ctx.user.id);
+    const workspaceId = await resolveWorkspaceId(ctx.user.id, ctx.user.name);
 
     const rows = await db
       .select()
