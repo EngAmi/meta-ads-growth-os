@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import {
   Plug, Upload, RefreshCw, Trash2, CheckCircle2, XCircle,
   AlertCircle, Clock, FileSpreadsheet, CloudUpload, Eye,
-  ChevronRight, Loader2, Wifi, WifiOff, Info, MessageCircle,
+  ChevronRight, ChevronDown, ChevronUp, Loader2, Wifi, WifiOff, Info, MessageCircle,
   Copy, Shield, CheckCheck, ExternalLink, CalendarClock
 } from "lucide-react";
 
@@ -880,8 +880,81 @@ function formatDuration(ms: number | null | undefined): string {
   return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
 }
 
+function StepResultsPanel({ stepResults, stepErrors }: {
+  stepResults: Record<string, Record<string, number>> | null;
+  stepErrors: Record<string, string> | null;
+}) {
+  const STEP_LABELS: Record<string, string> = {
+    dataIngestion:       "Data Ingestion",
+    metricsComputation:  "Metrics Computation",
+    baselineComputation: "Baseline Computation",
+    diagnosticEngine:    "Diagnostic Engine",
+    recommendationEngine:"Recommendation Engine",
+    dailyBriefEngine:    "Daily Brief",
+  };
+  const STEP_ORDER = Object.keys(STEP_LABELS);
+
+  const errorEntries = stepErrors ? Object.entries(stepErrors) : [];
+  const resultEntries = stepResults ? Object.entries(stepResults) : [];
+
+  if (resultEntries.length === 0 && errorEntries.length === 0) return null;
+
+  return (
+    <div className="border-t border-slate-700/50 px-4 py-3 space-y-2">
+      {resultEntries
+        .sort(([a], [b]) => STEP_ORDER.indexOf(a) - STEP_ORDER.indexOf(b))
+        .map(([step, result]) => {
+          const label = STEP_LABELS[step] ?? step;
+          const hasError = !!stepErrors?.[step];
+          const summaryParts = Object.entries(result)
+            .filter(([, v]) => typeof v === "number")
+            .map(([k, v]) => `${k.replace(/([A-Z])/g, " $1").trim()}: ${v}`);
+          return (
+            <div key={step} className="flex items-start gap-2 text-xs">
+              {hasError
+                ? <XCircle className="w-3.5 h-3.5 text-red-400 mt-0.5 shrink-0" />
+                : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />}
+              <div className="min-w-0">
+                <span className="text-slate-300 font-medium">{label}</span>
+                {summaryParts.length > 0 && (
+                  <span className="text-slate-500 ml-2">{summaryParts.join(" · ")}</span>
+                )}
+                {hasError && (
+                  <p className="text-red-300 mt-0.5 break-all">{stepErrors![step]}</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      {/* Errors for steps not in stepResults */}
+      {errorEntries
+        .filter(([step]) => !stepResults?.[step])
+        .map(([step, msg]) => (
+          <div key={step} className="flex items-start gap-2 text-xs">
+            <XCircle className="w-3.5 h-3.5 text-red-400 mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <span className="text-slate-300 font-medium">{STEP_LABELS[step] ?? step}</span>
+              <p className="text-red-300 mt-0.5 break-all">{msg}</p>
+            </div>
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function ScheduledRunsTab() {
-  const { data: runs = [], isLoading } = trpc.engineDataSources.scheduledRuns.useQuery({});
+  const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
+  const toggleExpand = (id: string) =>
+    setExpandedRuns(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const { data: runs = [], isLoading } = trpc.engineDataSources.scheduledRuns.useQuery(
+    {},
+    { refetchInterval: 60_000 }
+  );
 
   if (isLoading) {
     return (
@@ -914,7 +987,10 @@ function ScheduledRunsTab() {
         return (
           <div key={run.id} className="rounded-xl bg-slate-800/40 border border-slate-700/50 overflow-hidden">
             {/* Header row */}
-            <div className="flex items-center justify-between px-4 py-3">
+            <div
+              className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-700/20 transition-colors"
+              onClick={() => toggleExpand(run.id)}
+            >
               <div className="flex items-center gap-3">
                 <CalendarClock className="w-4 h-4 text-slate-400 shrink-0" />
                 <div>
@@ -926,19 +1002,17 @@ function ScheduledRunsTab() {
                 <span className="text-xs text-slate-400">{run.stepsCompleted}/6 steps</span>
                 <span className="text-xs text-slate-500">{formatDuration(run.durationMs)}</span>
                 <RunStatusBadge status={run.status} />
+                {expandedRuns.has(run.id)
+                  ? <ChevronUp className="w-4 h-4 text-slate-500" />
+                  : <ChevronDown className="w-4 h-4 text-slate-500" />}
               </div>
             </div>
-            {/* Step errors (only if present) */}
-            {errorEntries.length > 0 && (
-              <div className="border-t border-slate-700/50 px-4 py-3 space-y-1">
-                <p className="text-xs font-medium text-red-400 uppercase tracking-wider mb-2">Step Errors</p>
-                {errorEntries.map(([step, msg]) => (
-                  <div key={step} className="flex gap-2 text-xs">
-                    <span className="text-slate-400 font-mono shrink-0">{step}:</span>
-                    <span className="text-red-300 break-all">{msg}</span>
-                  </div>
-                ))}
-              </div>
+            {/* Step details (expanded) */}
+            {expandedRuns.has(run.id) && (
+              <StepResultsPanel
+                stepResults={run.stepResults as Record<string, Record<string, number>> | null}
+                stepErrors={run.stepErrors as Record<string, string> | null}
+              />
             )}
           </div>
         );
