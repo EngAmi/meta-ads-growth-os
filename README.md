@@ -26,6 +26,9 @@ The system is built around a single principle: **no more manual exports**. Conne
 ### Data Sources — Meta Ads API Connection
 ![Data Sources — Facebook OAuth, manual token form, engine integrations, and saved connections](docs/images/datasources.png)
 
+### Navigation — Full Feature Sidebar
+![Full sidebar navigation showing all modules: Overview, Performance, Intelligence, Reports, and Settings](docs/images/sidebar-overview.png)
+
 ---
 
 ## Key Features
