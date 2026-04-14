@@ -1139,6 +1139,146 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
     }),
   }),
 
+  // ─── CSV Metrics Dashboard ──────────────────────────────────────────────────
+  csvDashboard: router({
+    /**
+     * Overall KPI summary across all imported adInsights rows.
+     * Accepts an optional date range (ISO strings). Defaults to last 30 days.
+     */
+    summary: publicProcedure
+      .input(z.object({
+        from: z.string().optional(), // YYYY-MM-DD
+        to: z.string().optional(),   // YYYY-MM-DD
+      }).optional())
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return null;
+        const from = input?.from ? new Date(`${input.from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 86_400_000);
+        const to   = input?.to   ? new Date(`${input.to}T23:59:59.999Z`)   : new Date();
+        const [row] = await db
+          .select({
+            totalSpend:       sql<number>`COALESCE(SUM(CAST(${adInsights.spend} AS DECIMAL(14,4))), 0)`,
+            totalImpressions: sql<number>`COALESCE(SUM(${adInsights.impressions}), 0)`,
+            totalClicks:      sql<number>`COALESCE(SUM(${adInsights.clicks}), 0)`,
+            totalLeads:       sql<number>`COALESCE(SUM(${adInsights.leads}), 0)`,
+            totalReach:       sql<number>`COALESCE(SUM(${adInsights.reach}), 0)`,
+            avgCtr:           sql<number>`COALESCE(AVG(CAST(${adInsights.ctr} AS DECIMAL(10,6))), 0)`,
+            avgCpm:           sql<number>`COALESCE(AVG(CAST(${adInsights.cpm} AS DECIMAL(10,4))), 0)`,
+            avgCpc:           sql<number>`COALESCE(AVG(CAST(${adInsights.cpc} AS DECIMAL(10,4))), 0)`,
+            rowCount:         sql<number>`COUNT(*)`,
+          })
+          .from(adInsights)
+          .where(and(gte(adInsights.date, from), lte(adInsights.date, to)));
+        const leads = Number(row?.totalLeads ?? 0);
+        const spend = Number(row?.totalSpend ?? 0);
+        return {
+          totalSpend:       spend,
+          totalImpressions: Number(row?.totalImpressions ?? 0),
+          totalClicks:      Number(row?.totalClicks ?? 0),
+          totalLeads:       leads,
+          totalReach:       Number(row?.totalReach ?? 0),
+          avgCtr:           Number(row?.avgCtr ?? 0),
+          avgCpm:           Number(row?.avgCpm ?? 0),
+          avgCpc:           Number(row?.avgCpc ?? 0),
+          avgCpl:           leads > 0 ? spend / leads : 0,
+          rowCount:         Number(row?.rowCount ?? 0),
+        };
+      }),
+
+    /**
+     * Daily aggregated metrics for trend charts.
+     */
+    dailyTrend: publicProcedure
+      .input(z.object({
+        from: z.string().optional(),
+        to:   z.string().optional(),
+        metric: z.enum(["spend", "impressions", "clicks", "leads", "ctr", "cpm", "cpc"]).optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return [];
+        const from = input?.from ? new Date(`${input.from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 86_400_000);
+        const to   = input?.to   ? new Date(`${input.to}T23:59:59.999Z`)   : new Date();
+        const rows = await db
+          .select({
+            day:         sql<string>`DATE(${adInsights.date})`,
+            spend:       sql<number>`COALESCE(SUM(CAST(${adInsights.spend} AS DECIMAL(14,4))), 0)`,
+            impressions: sql<number>`COALESCE(SUM(${adInsights.impressions}), 0)`,
+            clicks:      sql<number>`COALESCE(SUM(${adInsights.clicks}), 0)`,
+            leads:       sql<number>`COALESCE(SUM(${adInsights.leads}), 0)`,
+            reach:       sql<number>`COALESCE(SUM(${adInsights.reach}), 0)`,
+            avgCtr:      sql<number>`COALESCE(AVG(CAST(${adInsights.ctr} AS DECIMAL(10,6))), 0)`,
+            avgCpm:      sql<number>`COALESCE(AVG(CAST(${adInsights.cpm} AS DECIMAL(10,4))), 0)`,
+            avgCpc:      sql<number>`COALESCE(AVG(CAST(${adInsights.cpc} AS DECIMAL(10,4))), 0)`,
+          })
+          .from(adInsights)
+          .where(and(gte(adInsights.date, from), lte(adInsights.date, to)))
+          .groupBy(sql`DATE(${adInsights.date})`)
+          .orderBy(sql`DATE(${adInsights.date})`);
+        return rows.map(r => ({
+          day:         String(r.day),
+          spend:       Number(r.spend),
+          impressions: Number(r.impressions),
+          clicks:      Number(r.clicks),
+          leads:       Number(r.leads),
+          reach:       Number(r.reach),
+          avgCtr:      Number(r.avgCtr),
+          avgCpm:      Number(r.avgCpm),
+          avgCpc:      Number(r.avgCpc),
+          cpl:         Number(r.leads) > 0 ? Number(r.spend) / Number(r.leads) : 0,
+        }));
+      }),
+
+    /**
+     * Per-campaign aggregated metrics for the breakdown table.
+     */
+    campaignBreakdown: publicProcedure
+      .input(z.object({
+        from:  z.string().optional(),
+        to:    z.string().optional(),
+        limit: z.number().min(1).max(200).optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return [];
+        const from  = input?.from  ? new Date(`${input.from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 86_400_000);
+        const to    = input?.to    ? new Date(`${input.to}T23:59:59.999Z`)   : new Date();
+        const lim   = input?.limit ?? 50;
+        const rows = await db
+          .select({
+            campaignId:  campaigns.id,
+            campaignName: campaigns.name,
+            spend:       sql<number>`COALESCE(SUM(CAST(${adInsights.spend} AS DECIMAL(14,4))), 0)`,
+            impressions: sql<number>`COALESCE(SUM(${adInsights.impressions}), 0)`,
+            clicks:      sql<number>`COALESCE(SUM(${adInsights.clicks}), 0)`,
+            leads:       sql<number>`COALESCE(SUM(${adInsights.leads}), 0)`,
+            reach:       sql<number>`COALESCE(SUM(${adInsights.reach}), 0)`,
+            avgCtr:      sql<number>`COALESCE(AVG(CAST(${adInsights.ctr} AS DECIMAL(10,6))), 0)`,
+            avgCpm:      sql<number>`COALESCE(AVG(CAST(${adInsights.cpm} AS DECIMAL(10,4))), 0)`,
+            avgCpc:      sql<number>`COALESCE(AVG(CAST(${adInsights.cpc} AS DECIMAL(10,4))), 0)`,
+          })
+          .from(adInsights)
+          .innerJoin(campaigns, eq(adInsights.campaignId, campaigns.id))
+          .where(and(gte(adInsights.date, from), lte(adInsights.date, to)))
+          .groupBy(campaigns.id, campaigns.name)
+          .orderBy(sql`SUM(CAST(${adInsights.spend} AS DECIMAL(14,4))) DESC`)
+          .limit(lim);
+        return rows.map(r => ({
+          campaignId:   r.campaignId,
+          campaignName: r.campaignName,
+          spend:        Number(r.spend),
+          impressions:  Number(r.impressions),
+          clicks:       Number(r.clicks),
+          leads:        Number(r.leads),
+          reach:        Number(r.reach),
+          avgCtr:       Number(r.avgCtr),
+          avgCpm:       Number(r.avgCpm),
+          avgCpc:       Number(r.avgCpc),
+          cpl:          Number(r.leads) > 0 ? Number(r.spend) / Number(r.leads) : 0,
+        }));
+      }),
+  }),
+
   // ─── WhatsApp Webhook Settings ────────────────────────────────────────────
   whatsapp: router({
     getConfig: publicProcedure.query(() => {

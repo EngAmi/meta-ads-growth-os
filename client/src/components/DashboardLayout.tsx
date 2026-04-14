@@ -24,7 +24,7 @@ import { useIsMobile } from "@/hooks/useMobile";
 import {
   LayoutDashboard, TrendingUp, Users, Target, GitBranch,
   Lightbulb, Brain, BarChart3, Calendar, Trophy, LogOut,
-  PanelLeft, Zap, ChevronRight, Database, Home
+  PanelLeft, Zap, ChevronRight, Database, Home, BarChart2
 } from "lucide-react";
 import DateRangePicker from "./DateRangePicker";
 import { CSSProperties, useEffect, useRef, useState } from "react";
@@ -61,6 +61,7 @@ const menuGroups = [
       { icon: BarChart3, label: "Weekly Reports", path: "/weekly" },
       { icon: Calendar, label: "Forecasting", path: "/forecast" },
       { icon: Trophy, label: "Leaderboards", path: "/leaderboard" },
+      { icon: BarChart2, label: "CSV Dashboard", path: "/csv-dashboard" },
     ]
   },
   {

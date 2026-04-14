@@ -18,6 +18,7 @@ import WeeklyReports from "./pages/WeeklyReports";
 import Forecasting from "./pages/Forecasting";
 import Leaderboard from "./pages/Leaderboard";
 import DataSources from "./pages/DataSources";
+import CsvDashboard from "./pages/CsvDashboard";
 
 function Router() {
   return (
@@ -33,6 +34,7 @@ function Router() {
       <Route path="/forecast" component={Forecasting} />
       <Route path="/leaderboard" component={Leaderboard} />
       <Route path="/data-sources" component={DataSources} />
+      <Route path="/csv-dashboard" component={CsvDashboard} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
