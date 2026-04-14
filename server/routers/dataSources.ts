@@ -10,7 +10,7 @@
  */
 
 import { z } from "zod";
-import { eq, and, desc, SQL } from "drizzle-orm";
+import { eq, and, desc, sql, SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
@@ -139,6 +139,39 @@ export const dataSourcesRouter = router({
       status: result.status,
       stepsCompleted: result.stepsCompleted,
     };
+  }),
+
+  /**
+   * Return per-status counts for cron-triggered runs in the workspace.
+   * Used by the Scheduled Runs tab to show counts next to each filter pill.
+   */
+  scheduledRunCounts: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) return { all: 0, running: 0, completed: 0, failed: 0, partial: 0 };
+
+    const workspaceId = await resolveWorkspaceId(ctx.user.id, ctx.user.name);
+
+    const rows = await db
+      .select({
+        status: pipelineRuns.status,
+        count: sql<number>`cast(count(*) as unsigned)`,
+      })
+      .from(pipelineRuns)
+      .where(
+        and(
+          eq(pipelineRuns.workspaceId, workspaceId),
+          eq(pipelineRuns.trigger, "cron"),
+        ),
+      )
+      .groupBy(pipelineRuns.status);
+
+    const counts = { all: 0, running: 0, completed: 0, failed: 0, partial: 0 } as Record<string, number>;
+    for (const row of rows) {
+      const n = Number(row.count);
+      counts[row.status] = n;
+      counts.all += n;
+    }
+    return counts as { all: number; running: number; completed: number; failed: number; partial: number };
   }),
 
   /**

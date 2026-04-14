@@ -968,9 +968,15 @@ function ScheduledRunsTab() {
     onSuccess: (result) => {
       toast.success(`Run ${result.runId.slice(0, 8)}… started — ${result.status}`);
       utils.engineDataSources.scheduledRuns.invalidate();
+      utils.engineDataSources.scheduledRunCounts.invalidate();
     },
     onError: (e) => toast.error(e.message || "Failed to start run"),
   });
+
+  const { data: counts } = trpc.engineDataSources.scheduledRunCounts.useQuery(
+    undefined,
+    { refetchInterval: 60_000 }
+  );
 
   const { data: runs = [], isLoading } = trpc.engineDataSources.scheduledRuns.useQuery(
     { status: statusFilter },
@@ -991,19 +997,29 @@ function ScheduledRunsTab() {
       {/* Toolbar: filter pills + Run Now button */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          {STATUS_OPTIONS.map(opt => (
-            <button
-              key={opt.value}
-              onClick={() => setStatusFilter(opt.value)}
-              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                statusFilter === opt.value
-                  ? "bg-violet-600 border-violet-500 text-white"
-                  : "bg-slate-800/60 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+          {STATUS_OPTIONS.map(opt => {
+            const count = counts?.[opt.value];
+            return (
+              <button
+                key={opt.value}
+                onClick={() => setStatusFilter(opt.value)}
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  statusFilter === opt.value
+                    ? "bg-violet-600 border-violet-500 text-white"
+                    : "bg-slate-800/60 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
+                }`}
+              >
+                {opt.label}
+                {count !== undefined && count > 0 && (
+                  <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                    statusFilter === opt.value
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-700 text-slate-300"
+                  }`}>{count}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
         <Button
           size="sm"
