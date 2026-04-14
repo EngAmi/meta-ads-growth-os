@@ -254,14 +254,15 @@ export function registerMetaOAuthRoutes(app: Express) {
             )
           )
           .limit(1);
+        const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
         if (existing.length > 0) {
           await db.update(integrations)
-            .set({ accessToken: longLivedToken, status: "active", updatedAt: new Date() })
+            .set({ accessToken: longLivedToken, status: "active", tokenExpiresAt, updatedAt: new Date() })
             .where(eq(integrations.id, existing[0].id));
         } else {
           await db.insert(integrations).values({
             workspaceId, provider: "meta_ads", accessToken: longLivedToken,
-            metaAccountId: accountId, accountName: acc.name ?? null, status: "active",
+            metaAccountId: accountId, accountName: acc.name ?? null, status: "active", tokenExpiresAt,
           });
         }
         console.log(`[Meta OAuth] Single account auto-saved — workspace ${workspaceId}, account ${accountId}`);

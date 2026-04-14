@@ -40,7 +40,9 @@ export const dataSourcesRouter = router({
         id: integrations.id,
         provider: integrations.provider,
         adAccountId: integrations.metaAccountId,
+        accountName: integrations.accountName,
         status: integrations.status,
+        tokenExpiresAt: integrations.tokenExpiresAt,
         lastSyncAt: integrations.lastSyncAt,
         lastSyncRows: integrations.lastSyncRows,
         lastSyncError: integrations.lastSyncError,
@@ -333,6 +335,7 @@ export const dataSourcesRouter = router({
       }
 
       const { longLivedToken, workspaceId } = session;
+      const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
 
       // Upsert integration for the selected account
       const existing = await db
@@ -350,7 +353,7 @@ export const dataSourcesRouter = router({
       if (existing.length > 0) {
         await db
           .update(integrations)
-          .set({ accessToken: longLivedToken, status: "active", updatedAt: new Date() })
+          .set({ accessToken: longLivedToken, status: "active", tokenExpiresAt, updatedAt: new Date() })
           .where(eq(integrations.id, existing[0].id));
       } else {
         await db.insert(integrations).values({
@@ -360,6 +363,7 @@ export const dataSourcesRouter = router({
           metaAccountId: input.accountId,
           accountName: input.accountName ?? null,
           status: "active",
+          tokenExpiresAt,
         });
       }
 

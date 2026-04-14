@@ -300,6 +300,7 @@ export const integrations = mysqlTable(
     status: mysqlEnum("integrationStatus", ["active", "expired", "error"])
       .notNull()
       .default("active"),
+    tokenExpiresAt: timestamp("tokenExpiresAt"),
     lastSyncAt: timestamp("lastSyncAt"),
     lastSyncRows: int("lastSyncRows").notNull().default(0),
     lastSyncError: text("lastSyncError"),
@@ -307,7 +308,7 @@ export const integrations = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   (t) => [
-    uniqueIndex("idx_integration_ws_provider").on(t.workspaceId, t.provider),
+    uniqueIndex("idx_integration_ws_provider_account").on(t.workspaceId, t.provider, t.metaAccountId),
     index("idx_integration_ws").on(t.workspaceId),
   ],
 );

@@ -57,6 +57,13 @@
       "when": 1776145176276,
       "tag": "0007_icy_hulk",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1776178015577,
+      "tag": "0008_military_mimic",
+      "breakpoints": true
     }
   ]
 }

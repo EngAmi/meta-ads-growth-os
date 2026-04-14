@@ -26,9 +26,9 @@
  */
 
 import cron from "node-cron";
-import { and, eq, gte, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray, lt } from "drizzle-orm";
 import { getDb } from "./db";
-import { integrations, pipelineRuns } from "../drizzle/schema";
+import { integrations, metaOAuthSessions, pipelineRuns } from "../drizzle/schema";
 import { runPipeline } from "./engines/pipeline";
 import { notifyOwner } from "./_core/notification";
 
@@ -168,6 +168,19 @@ export async function runNightlyPipelines(): Promise<void> {
   }
 
   console.log("[nightly-cron] Nightly pipeline run finished");
+
+  // Clean up expired OAuth sessions
+  try {
+    const result = await db
+      .delete(metaOAuthSessions)
+      .where(lt(metaOAuthSessions.expiresAt, new Date()));
+    const deleted = (result as any)[0]?.affectedRows ?? 0;
+    if (deleted > 0) {
+      console.log(`[nightly-cron] Cleaned up ${deleted} expired meta_oauth_sessions`);
+    }
+  } catch (cleanupErr) {
+    console.error("[nightly-cron] Failed to clean up expired OAuth sessions", cleanupErr);
+  }
 }
 
 // ─── Registration ─────────────────────────────────────────────────────────────

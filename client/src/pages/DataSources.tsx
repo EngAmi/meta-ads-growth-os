@@ -369,7 +369,9 @@ function EngineIntegrationsPanel() {
                   </svg>
                 </div>
                 <div>
-                  <p className="font-medium text-white capitalize">{intg.provider?.replace('_', ' ')} · <span className="font-mono text-slate-300">act_{String(intg.adAccountId || '').replace('act_', '')}</span></p>
+                  <p className="font-medium text-white capitalize">
+                    {intg.accountName || intg.provider?.replace('_', ' ')} · <span className="font-mono text-slate-300">act_{String(intg.adAccountId || '').replace('act_', '')}</span>
+                  </p>
                   {intg.lastSyncAt ? (
                     <p className="text-xs text-slate-400 mt-0.5">
                       Last sync: {new Date(intg.lastSyncAt).toLocaleString()} · {intg.lastSyncRows ?? 0} rows
@@ -377,7 +379,14 @@ function EngineIntegrationsPanel() {
                   ) : (
                     <p className="text-xs text-slate-500 mt-0.5">Never synced</p>
                   )}
-                  {intg.status === 'expired' && (
+                  {intg.tokenExpiresAt && (() => {
+                    const exp = new Date(intg.tokenExpiresAt);
+                    const daysLeft = Math.ceil((exp.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                    if (daysLeft <= 0) return <p className="text-xs text-red-400 mt-0.5">Token expired — reconnect to resume syncing</p>;
+                    if (daysLeft <= 7) return <p className="text-xs text-amber-400 mt-0.5">⚠ Token expires in {daysLeft}d — reconnect soon</p>;
+                    return <p className="text-xs text-slate-500 mt-0.5">Token expires {exp.toLocaleDateString()}</p>;
+                  })()}
+                  {intg.status === 'expired' && !intg.tokenExpiresAt && (
                     <p className="text-xs text-red-400 mt-0.5">Token expired — reconnect to resume syncing</p>
                   )}
                 </div>
