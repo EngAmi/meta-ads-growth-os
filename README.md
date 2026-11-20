@@ -107,9 +107,10 @@ All rules require a minimum impression threshold (default: 1,000) to avoid noise
 ### Prerequisites
 
 - Node.js 22+
-- pnpm 9+
+- pnpm 10.34+ (`corepack enable` picks the pinned version from `package.json`)
 - MySQL 8 or TiDB (connection string in `DATABASE_URL`)
-- Meta Developer App with `ads_read`, `ads_management`, `business_management`, `read_insights` permissions
+- Meta Developer App with `ads_read` and `business_management` permissions
+- Meta Graph / Marketing API **v25.0** (default; override with `META_GRAPH_API_VERSION`)
 
 ### Installation
 
@@ -130,7 +131,7 @@ pnpm dev
 
 ### Environment Variables
 
-Create a `.env` file at the project root (never commit this file):
+Copy `.env.example` to `.env` and fill it in (never commit `.env`):
 
 ```env
 DATABASE_URL=mysql://user:password@host:3306/dbname
@@ -139,6 +140,14 @@ JWT_SECRET=your-secret-key
 # Meta / Facebook OAuth
 META_APP_ID=your-meta-app-id
 META_APP_SECRET=your-meta-app-secret
+PUBLIC_APP_URL=https://your-domain.com        # used to build the OAuth redirect_uri
+# META_GRAPH_API_VERSION=v25.0                # pin a different Graph/Marketing API version
+# META_OAUTH_SCOPES=ads_read,business_management
+# META_USE_APPSECRET_PROOF=true               # if "Require App Secret" is on in your Meta app
+
+# WhatsApp Cloud API webhook (required in production)
+WHATSAPP_APP_SECRET=your-meta-app-secret
+WHATSAPP_VERIFY_TOKEN=a-long-random-string
 
 # Manus platform (if self-hosting outside Manus)
 VITE_APP_ID=your-oauth-app-id
@@ -156,8 +165,12 @@ CRON_SCHEDULE=0 0 * * *
 1. Create a Meta Developer App at [developers.facebook.com](https://developers.facebook.com)
 2. Add **Facebook Login** product and enable **Web** platform
 3. Add your domain to **Valid OAuth Redirect URIs**: `https://your-domain.com/api/meta/oauth/callback`
-4. Request permissions: `ads_read`, `ads_management`, `business_management`, `read_insights`
+4. Request permissions: `ads_read`, `business_management` (read-only — Growth OS never writes to your ad account)
 5. Set `META_APP_ID` and `META_APP_SECRET` in your environment
+
+> **API versions:** Meta retires Marketing API versions roughly a year after release
+> (v19.0 expired 2025-02-04, v24.0 on 2026-10-06). All Graph calls go through
+> `server/meta/graph.ts`, so upgrading is a one-line change or an env var.
 
 ---
 
@@ -167,7 +180,7 @@ CRON_SCHEDULE=0 0 * * *
 pnpm test
 ```
 
-The test suite covers 139 tests across 5 suites: auth, diagnostic engine (97 unit tests), nightly scheduler, data pipeline, and tRPC procedures.
+The test suite covers 154 tests across 6 suites: auth & access control, diagnostic engine (97 unit tests), nightly scheduler, data pipeline, tRPC procedures, and the Meta Graph client / webhook signature checks.
 
 ---
 

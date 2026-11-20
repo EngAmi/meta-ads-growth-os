@@ -101,14 +101,18 @@ function scoreMessage(text: string, phone: string): ScoringResult {
 
 // ─── Webhook Handler ──────────────────────────────────────────────────────────
 
-function verifySignature(payload: string, signature: string, secret: string): boolean {
-  if (!secret || !signature) return true; // skip if not configured
-  const expected = "sha256=" + crypto.createHmac("sha256", secret).update(payload).digest("hex");
-  try {
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-  } catch {
-    return false;
-  }
+/**
+ * Verify Meta's X-Hub-Signature-256 header.
+ * MUST be computed over the raw request bytes: re-serialising req.body with
+ * JSON.stringify changes escaping (Meta sends Arabic as \uXXXX), so valid
+ * Arabic messages were being rejected whenever WHATSAPP_APP_SECRET was set.
+ */
+export function verifySignature(rawBody: Buffer | string, signature: string, secret: string): boolean {
+  if (!secret || !signature) return false;
+  const expected = "sha256=" + crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 export function registerWhatsAppWebhook(app: any) {
@@ -118,9 +122,9 @@ export function registerWhatsAppWebhook(app: any) {
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
 
-    const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || "growth_os_verify_token";
+    const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
 
-    if (mode === "subscribe" && token === verifyToken) {
+    if (verifyToken && mode === "subscribe" && token === verifyToken) {
       console.log("[WhatsApp] Webhook verified successfully");
       return res.status(200).send(challenge);
     }
@@ -129,12 +133,18 @@ export function registerWhatsAppWebhook(app: any) {
 
   // ─── POST: Incoming messages ──────────────────────────────────────────────────
   app.post("/api/webhook/whatsapp", async (req: Request, res: Response) => {
-    // Verify signature
-    const rawBody = JSON.stringify(req.body);
-    const signature = req.headers["x-hub-signature-256"] as string || "";
+    // Verify signature over the raw bytes captured in server/_core/index.ts
+    const rawBody: Buffer | undefined = (req as any).rawBody;
+    const signature = (req.headers["x-hub-signature-256"] as string) || "";
     const appSecret = process.env.WHATSAPP_APP_SECRET || "";
 
-    if (appSecret && !verifySignature(rawBody, signature, appSecret)) {
+    if (!appSecret) {
+      // Without a secret anyone could POST fake leads. Allow only in development.
+      if (process.env.NODE_ENV === "production") {
+        console.error("[WhatsApp] WHATSAPP_APP_SECRET is not set — rejecting webhook");
+        return res.status(503).json({ error: "Webhook not configured" });
+      }
+    } else if (!rawBody || !verifySignature(rawBody, signature, appSecret)) {
       console.warn("[WhatsApp] Invalid signature");
       return res.status(401).json({ error: "Invalid signature" });
     }
@@ -170,7 +180,9 @@ export function registerWhatsAppWebhook(app: any) {
             // Score the lead
             const scoring = scoreMessage(text, phone);
 
-            console.log(`[WhatsApp] New lead: ${phone} | Score: ${scoring.score} | Intent: ${scoring.intentLevel} | Fake: ${scoring.isFake}`);
+            // Mask the phone number in logs (PII).
+            const maskedPhone = phone.length > 4 ? `${"*".repeat(phone.length - 4)}${phone.slice(-4)}` : "****";
+            console.log(`[WhatsApp] New lead: ${maskedPhone} | Score: ${scoring.score} | Intent: ${scoring.intentLevel} | Fake: ${scoring.isFake}`);
 
             // Insert into leads table
             const db = await getDb();

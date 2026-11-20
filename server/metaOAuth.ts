@@ -20,16 +20,30 @@ import { getDb } from "./db";
 import { integrations, metaOAuthSessions, workspaces } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { sdk } from "./_core/sdk";
+import {
+  OAUTH_DIALOG_URL,
+  oauthAccessToken,
+  exchangeForLongLivedToken,
+  graphGetAll,
+  tokenExpiryDate,
+  stripActPrefix,
+} from "./meta/graph";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const META_GRAPH = "https://graph.facebook.com/v19.0";
-const SCOPES = [
-  "ads_read",
-  "ads_management",
-  "business_management",
-  "read_insights",
-].join(",");
+/**
+ * Least-privilege scopes. Growth OS only *reads* ads data:
+ *   - ads_read             → campaigns, ad sets, insights
+ *   - business_management  → list ad accounts owned by a Business Manager
+ * `ads_management` (write) and `read_insights` (Page insights) were requested
+ * before but never used; requesting them makes Meta App Review harder.
+ * Override with META_OAUTH_SCOPES if you add write features.
+ */
+const SCOPES = (process.env.META_OAUTH_SCOPES ?? "ads_read,business_management")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean)
+  .join(",");
 
 const STATE_COOKIE = "meta_oauth_state";
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -43,10 +57,13 @@ function getQueryParam(req: Request, key: string): string | undefined {
 }
 
 /**
- * Derive the public origin from the request headers.
- * Works behind the Manus reverse proxy (x-forwarded-host) and locally.
+ * Public origin used to build the OAuth redirect_uri.
+ * Prefer the PUBLIC_APP_URL env var (not spoofable); fall back to request
+ * headers, which works behind the Manus reverse proxy and locally.
  */
 function getOrigin(req: Request): string {
+  const configured = process.env.PUBLIC_APP_URL?.replace(/\/$/, "");
+  if (configured) return configured;
   const host = req.headers["x-forwarded-host"] ?? req.headers.host;
   const proto = (req.headers["x-forwarded-proto"] as string | undefined) ?? req.protocol;
   return `${proto}://${host}`;
@@ -79,38 +96,20 @@ async function resolveWorkspaceId(userId: number, userName?: string | null): Pro
   return created[0].id;
 }
 
-/** Exchange a short-lived token for a 60-day long-lived token. */
-async function exchangeForLongLivedToken(shortToken: string): Promise<string> {
-  const url = new URL(`${META_GRAPH}/oauth/access_token`);
-  url.searchParams.set("grant_type", "fb_exchange_token");
-  url.searchParams.set("client_id", ENV.metaAppId);
-  url.searchParams.set("client_secret", ENV.metaAppSecret);
-  url.searchParams.set("fb_exchange_token", shortToken);
-
-  const res = await fetch(url.toString());
-  const data = await res.json() as { access_token?: string; error?: { message: string } };
-
-  if (data.error || !data.access_token) {
-    throw new Error(data.error?.message ?? "Failed to exchange for long-lived token");
-  }
-  return data.access_token;
+interface MetaAdAccount {
+  id: string;
+  name: string;
+  account_id: string;
+  account_status?: number;
+  currency?: string;
 }
 
-/** Fetch the list of ad accounts accessible by the token. */
-async function fetchAdAccounts(token: string): Promise<{ id: string; name: string; account_id: string }[]> {
-  const url = new URL(`${META_GRAPH}/me/adaccounts`);
-  url.searchParams.set("fields", "id,name,account_id,account_status,currency");
-  url.searchParams.set("access_token", token);
-  url.searchParams.set("limit", "50");
-
-  const res = await fetch(url.toString());
-  const data = await res.json() as {
-    data?: { id: string; name: string; account_id: string }[];
-    error?: { message: string };
-  };
-
-  if (data.error) throw new Error(data.error.message);
-  return data.data ?? [];
+/** Fetch every ad account accessible by the token (paginated). */
+function fetchAdAccounts(token: string): Promise<MetaAdAccount[]> {
+  return graphGetAll<MetaAdAccount>("me/adaccounts", token, {
+    fields: "id,name,account_id,account_status,currency",
+    limit: 100,
+  });
 }
 
 // ─── Route registration ───────────────────────────────────────────────────────
@@ -149,7 +148,7 @@ export function registerMetaOAuthRoutes(app: Express) {
     const origin = getOrigin(req);
     const redirectUri = `${origin}/api/meta/oauth/callback`;
 
-    const dialogUrl = new URL("https://www.facebook.com/v19.0/dialog/oauth");
+    const dialogUrl = new URL(OAUTH_DIALOG_URL);
     dialogUrl.searchParams.set("client_id", ENV.metaAppId);
     dialogUrl.searchParams.set("redirect_uri", redirectUri);
     dialogUrl.searchParams.set("scope", SCOPES);
@@ -204,26 +203,25 @@ export function registerMetaOAuthRoutes(app: Express) {
       const redirectUri = `${origin}/api/meta/oauth/callback`;
 
       // Exchange authorisation code for short-lived token
-      const tokenUrl = new URL(`${META_GRAPH}/oauth/access_token`);
-      tokenUrl.searchParams.set("client_id", ENV.metaAppId);
-      tokenUrl.searchParams.set("client_secret", ENV.metaAppSecret);
-      tokenUrl.searchParams.set("redirect_uri", redirectUri);
-      tokenUrl.searchParams.set("code", code);
-
-      const tokenRes = await fetch(tokenUrl.toString());
-      const tokenData = await tokenRes.json() as {
-        access_token?: string;
-        error?: { message: string };
-      };
-
-      if (tokenData.error || !tokenData.access_token) {
-        console.error("[Meta OAuth] Token exchange failed:", tokenData.error);
-        res.redirect(302, `/data-sources?meta_error=${encodeURIComponent(tokenData.error?.message ?? "token_exchange_failed")}`);
+      let shortToken: string;
+      try {
+        const tokenData = await oauthAccessToken({
+          client_id: ENV.metaAppId,
+          client_secret: ENV.metaAppSecret,
+          redirect_uri: redirectUri,
+          code,
+        });
+        shortToken = tokenData.access_token;
+      } catch (err) {
+        console.error("[Meta OAuth] Token exchange failed:", err);
+        res.redirect(302, "/data-sources?meta_error=token_exchange_failed");
         return;
       }
 
-      // Exchange for 60-day long-lived token
-      const longLivedToken = await exchangeForLongLivedToken(tokenData.access_token);
+      // Exchange for a long-lived token (~60 days) and keep Meta's real expiry
+      const longLived = await exchangeForLongLivedToken(shortToken, ENV.metaAppId, ENV.metaAppSecret);
+      const longLivedToken = longLived.access_token;
+      const tokenExpiresAt = tokenExpiryDate(longLived.expires_in);
 
       // Fetch ad accounts accessible by this token
       const adAccounts = await fetchAdAccounts(longLivedToken);
@@ -242,7 +240,7 @@ export function registerMetaOAuthRoutes(app: Express) {
       // If only one account, skip the picker and save directly
       if (adAccounts.length === 1) {
         const acc = adAccounts[0];
-        const accountId = acc.account_id ?? acc.id.replace("act_", "");
+        const accountId = acc.account_id ?? stripActPrefix(acc.id);
         const existing = await db
           .select({ id: integrations.id })
           .from(integrations)
@@ -254,7 +252,6 @@ export function registerMetaOAuthRoutes(app: Express) {
             )
           )
           .limit(1);
-        const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
         if (existing.length > 0) {
           await db.update(integrations)
             .set({ accessToken: longLivedToken, status: "active", tokenExpiresAt, updatedAt: new Date() })
@@ -286,7 +283,8 @@ export function registerMetaOAuthRoutes(app: Express) {
       res.redirect(302, `/data-sources?meta_session=${sessionId}`);
     } catch (err) {
       console.error("[Meta OAuth] Callback error:", err);
-      res.redirect(302, `/data-sources?meta_error=${encodeURIComponent(String(err))}`);
+      // Don't reflect internal error text into the URL / browser history.
+      res.redirect(302, "/data-sources?meta_error=oauth_failed");
     }
   });
 }

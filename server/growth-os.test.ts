@@ -43,9 +43,18 @@ describe("Growth OS - Auth", () => {
   });
 });
 
+describe("Growth OS - Access control", () => {
+  it("rejects unauthenticated access to business data", async () => {
+    const caller = appRouter.createCaller(createPublicContext());
+    await expect(caller.dashboard.summary()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.dataSources.listConnections()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.whatsapp.getRecentLeads()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+});
+
 describe("Growth OS - Dashboard", () => {
   it("dashboard.summary returns null or object when DB unavailable", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.dashboard.summary();
     // Either null (no DB) or a valid object with nested structure
     if (result !== null) {
@@ -57,7 +66,7 @@ describe("Growth OS - Dashboard", () => {
   });
 
   it("dashboard.funnelHealth returns null or valid object", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.dashboard.funnelHealth();
     if (result !== null) {
       expect(result).toHaveProperty("roas");
@@ -68,19 +77,19 @@ describe("Growth OS - Dashboard", () => {
 
 describe("Growth OS - Ads", () => {
   it("ads.campaigns returns an array", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.ads.campaigns();
     expect(Array.isArray(result)).toBe(true);
   });
 
   it("ads.insights accepts days parameter", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.ads.insights({ days: 7 });
     expect(Array.isArray(result)).toBe(true);
   });
 
   it("ads.adSets returns an array", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.ads.adSets();
     expect(Array.isArray(result)).toBe(true);
   });
@@ -88,14 +97,14 @@ describe("Growth OS - Ads", () => {
 
 describe("Growth OS - Leads", () => {
   it("leads.list returns paginated results", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.leads.list({ limit: 10, offset: 0 });
     // Returns { data, total } or array
     expect(result).toBeDefined();
   });
 
   it("leads.stats returns null or valid stats object", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.leads.stats();
     if (result !== null) {
       expect(result).toHaveProperty("total");
@@ -105,13 +114,13 @@ describe("Growth OS - Leads", () => {
 
 describe("Growth OS - Sales", () => {
   it("sales.agents returns an array", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.sales.agents();
     expect(Array.isArray(result)).toBe(true);
   });
 
   it("sales.teamStats returns null or valid object", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.sales.teamStats();
     if (result !== null) {
       expect(result).toHaveProperty("avgConversionRate");
@@ -121,13 +130,13 @@ describe("Growth OS - Sales", () => {
 
 describe("Growth OS - Funnel", () => {
   it("funnel.bottlenecks returns an array", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.funnel.bottlenecks();
     expect(Array.isArray(result)).toBe(true);
   });
 
   it("funnel.overview returns null or valid object", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.funnel.overview();
     if (result !== null) {
       expect(result).toHaveProperty("adsMetrics");
@@ -137,7 +146,7 @@ describe("Growth OS - Funnel", () => {
 
 describe("Growth OS - Recommendations", () => {
   it("recommendations.list returns an array", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.recommendations.list();
     expect(Array.isArray(result)).toBe(true);
   });
@@ -164,7 +173,7 @@ describe("Growth OS - Recommendations", () => {
 
 describe("Growth OS - Daily Summary", () => {
   it("dailySummary.latest returns null or valid object", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.dailySummary.latest();
     if (result !== null) {
       expect(result).toHaveProperty("date");
@@ -172,7 +181,7 @@ describe("Growth OS - Daily Summary", () => {
   });
 
   it("dailySummary.list returns an array", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.dailySummary.list();
     expect(Array.isArray(result)).toBe(true);
   });
@@ -180,13 +189,13 @@ describe("Growth OS - Daily Summary", () => {
 
 describe("Growth OS - Weekly Reports", () => {
   it("weeklyReports.list returns an array", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.weeklyReports.list();
     expect(Array.isArray(result)).toBe(true);
   });
 
   it("weeklyReports.trend returns an array", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.weeklyReports.trend();
     expect(Array.isArray(result)).toBe(true);
   });
@@ -194,7 +203,7 @@ describe("Growth OS - Weekly Reports", () => {
 
 describe("Growth OS - Forecast", () => {
   it("forecast.revenue returns null or valid forecast object", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.forecast.revenue();
     if (result !== null) {
       expect(result).toHaveProperty("forecast");
@@ -205,13 +214,13 @@ describe("Growth OS - Forecast", () => {
 
 describe("Growth OS - Leaderboard", () => {
   it("leaderboard.agents returns an array", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.leaderboard.agents();
     expect(Array.isArray(result)).toBe(true);
   });
 
   it("leaderboard.campaigns returns an array", async () => {
-    const caller = appRouter.createCaller(createPublicContext());
+    const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.leaderboard.campaigns();
     expect(Array.isArray(result)).toBe(true);
   });

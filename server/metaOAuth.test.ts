@@ -7,6 +7,7 @@
  * META_APP_SECRET in the project secrets to re-enable live validation.
  */
 import { describe, it, expect } from "vitest";
+import { GRAPH_API_BASE } from "./meta/graph";
 
 describe("Meta OAuth credentials", () => {
   it("META_APP_ID and META_APP_SECRET resolve to a real Meta app", async () => {
@@ -23,8 +24,9 @@ describe("Meta OAuth credentials", () => {
       return;
     }
 
-    const url = `https://graph.facebook.com/v19.0/${appId}?fields=id,name&access_token=${appId}|${appSecret}`;
-    const res = await fetch(url);
+    const res = await fetch(`${GRAPH_API_BASE}/${appId}?fields=id,name`, {
+      headers: { Authorization: `Bearer ${appId}|${appSecret}` },
+    });
     const data = await res.json() as { id?: string; name?: string; error?: { message: string } };
 
     expect(data.error, `Meta API error: ${data.error?.message}`).toBeUndefined();

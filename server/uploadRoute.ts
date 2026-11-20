@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import * as XLSX from "xlsx";
+import { sdk } from "./_core/sdk";
 import { getDb } from "./db";
 import { importJobs } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
@@ -24,8 +25,18 @@ const upload = multer({
   },
 });
 
+/** Reject unauthenticated uploads before multer buffers the file / XLSX parses it. */
+async function requireAuth(req: any, res: any, next: () => void) {
+  try {
+    await sdk.authenticateRequest(req);
+    next();
+  } catch {
+    res.status(401).json({ error: "Unauthorized" });
+  }
+}
+
 export function registerUploadRoutes(app: Router | any) {
-  app.post("/api/upload/meta-report", upload.single("file"), async (req: any, res: any) => {
+  app.post("/api/upload/meta-report", requireAuth, upload.single("file"), async (req: any, res: any) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });

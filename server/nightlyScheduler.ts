@@ -35,6 +35,7 @@ import { and, eq, gte, inArray, lt, lte } from "drizzle-orm";
 import { getDb } from "./db";
 import { integrations, metaOAuthSessions, pipelineRuns } from "../drizzle/schema";
 import { runPipeline } from "./engines/pipeline";
+import { exchangeForLongLivedToken, tokenExpiryDate } from "./meta/graph";
 import { notifyOwner } from "./_core/notification";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -92,21 +93,18 @@ export async function notifyFailure(params: {
  * Attempt to extend a Meta long-lived token via the Graph API.
  * Returns the new token string on success, or null on failure.
  */
-async function extendMetaToken(accessToken: string): Promise<string | null> {
+async function extendMetaToken(
+  accessToken: string,
+): Promise<{ token: string; expiresAt: Date } | null> {
   const appId     = process.env.META_APP_ID;
   const appSecret = process.env.META_APP_SECRET;
   // Skip if credentials are placeholder values
   if (!appId || !appSecret || appId === "000" || appSecret === "00") return null;
   try {
-    const url = new URL("https://graph.facebook.com/v19.0/oauth/access_token");
-    url.searchParams.set("grant_type",       "fb_exchange_token");
-    url.searchParams.set("client_id",        appId);
-    url.searchParams.set("client_secret",    appSecret);
-    url.searchParams.set("fb_exchange_token", accessToken);
-    const res = await fetch(url.toString());
-    if (!res.ok) return null;
-    const json = await res.json() as { access_token?: string };
-    return json.access_token ?? null;
+    const res = await exchangeForLongLivedToken(accessToken, appId, appSecret);
+    // Use Meta's real expires_in — re-exchanging a long-lived token does not
+    // always push the expiry out a full 60 days.
+    return { token: res.access_token, expiresAt: tokenExpiryDate(res.expires_in) };
   } catch {
     return null;
   }
@@ -154,9 +152,10 @@ async function manageExpiringTokens(): Promise<void> {
     const label      = intg.accountName ?? `act_${intg.metaAccountId}`;
 
     // Attempt auto-renew
-    const newToken = await extendMetaToken(intg.accessToken);
-    if (newToken) {
-      const newExpiry = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000); // 60 days
+    const renewed = await extendMetaToken(intg.accessToken);
+    if (renewed) {
+      const newToken = renewed.token;
+      const newExpiry = renewed.expiresAt;
       await db
         .update(integrations)
         .set({ accessToken: newToken, tokenExpiresAt: newExpiry, updatedAt: new Date() })

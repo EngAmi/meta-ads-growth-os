@@ -13,13 +13,13 @@
  *
  * Error handling:
  *   - Meta error code 190 (token expired/invalid) → status = 'expired'
- *   - Rate limit (error code 17 / 80000 / 80003 / 80004 / 80005 / 80006 / 80008)
- *     → exponential back-off with up to MAX_RETRIES attempts
+ *   - Throttling (codes 4/17/32/613/800xx) and transient 5xx → exponential
+ *     back-off inside server/meta/graph.ts
  *   - Any other API error → status = 'error', lastSyncError = message, throw
  *
- * Meta Graph API version: v19.0
+ * Meta Graph API version: see META_GRAPH_API_VERSION in server/meta/graph.ts
  * Insights fields pulled: impressions, clicks, spend, reach, frequency, actions
- * Action type mapped to leads: 'lead', 'onsite_conversion.lead_grouped'
+ * Leads: Meta's `lead` roll-up (falls back to instant-form + pixel leads)
  */
 
 import { eq, and } from "drizzle-orm";
@@ -31,54 +31,28 @@ import {
   dailyMetrics,
   type Integration,
 } from "../../drizzle/schema";
+import {
+  graphGetAll,
+  extractLeads,
+  MetaApiError,
+  stripActPrefix,
+  type MetaAction,
+} from "../meta/graph";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const GRAPH_API_VERSION = "v19.0";
-const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 
 /** Number of days of insights to pull on each sync. */
 const SYNC_DAYS = 30;
 
-/** Maximum retry attempts on rate-limit responses. */
-const MAX_RETRIES = 4;
-
-/** Initial back-off delay in milliseconds (doubles on each retry). */
-const INITIAL_BACKOFF_MS = 2_000;
-
-/**
- * Meta API error codes that indicate a rate-limit condition.
- * https://developers.facebook.com/docs/graph-api/overview/rate-limiting/
- */
-const RATE_LIMIT_CODES = new Set([17, 80000, 80003, 80004, 80005, 80006, 80008]);
-
-/** Meta API error code for an expired or invalid access token. */
-const TOKEN_EXPIRED_CODE = 190;
-
 // ─── Meta API types ───────────────────────────────────────────────────────────
 
-interface MetaApiError {
-  message: string;
-  type: string;
-  code: number;
-  error_subcode?: number;
-  fbtrace_id?: string;
-}
-
-interface MetaApiResponse<T> {
-  data?: T[];
-  error?: MetaApiError;
-  paging?: {
-    cursors?: { before: string; after: string };
-    next?: string;
-  };
-}
+type EntityStatus = "ACTIVE" | "PAUSED" | "DELETED" | "ARCHIVED";
 
 interface MetaCampaign {
   id: string;
   name: string;
   objective?: string;
-  status: "ACTIVE" | "PAUSED" | "DELETED" | "ARCHIVED";
+  status: EntityStatus;
   daily_budget?: string;
 }
 
@@ -86,13 +60,8 @@ interface MetaAdSet {
   id: string;
   name: string;
   campaign_id: string;
-  status: "ACTIVE" | "PAUSED" | "DELETED" | "ARCHIVED";
+  status: EntityStatus;
   daily_budget?: string;
-}
-
-interface MetaInsightAction {
-  action_type: string;
-  value: string;
 }
 
 interface MetaInsight {
@@ -105,7 +74,7 @@ interface MetaInsight {
   spend: string;
   reach: string;
   frequency: string;
-  actions?: MetaInsightAction[];
+  actions?: MetaAction[];
 }
 
 // ─── Public interface ─────────────────────────────────────────────────────────
@@ -123,83 +92,13 @@ export interface DataIngestionResult {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Sleep for `ms` milliseconds. */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const KNOWN_STATUSES: EntityStatus[] = ["ACTIVE", "PAUSED", "DELETED", "ARCHIVED"];
+const normStatus = (s: string): EntityStatus =>
+  KNOWN_STATUSES.includes(s as EntityStatus) ? (s as EntityStatus) : "PAUSED";
 
-/**
- * Fetch a single Meta Graph API URL with automatic retry on rate-limit errors.
- * Throws a typed error on token expiry (code 190) or after exhausting retries.
- */
-async function metaFetch<T>(
-  url: string,
-  attempt = 0,
-): Promise<MetaApiResponse<T>> {
-  const res = await fetch(url);
-  const body = (await res.json()) as MetaApiResponse<T>;
-
-  if (body.error) {
-    const { code, message } = body.error;
-
-    // Token expired — surface immediately, no retry.
-    if (code === TOKEN_EXPIRED_CODE) {
-      const err = new Error(`Meta token expired (code 190): ${message}`);
-      (err as NodeJS.ErrnoException).code = "META_TOKEN_EXPIRED";
-      throw err;
-    }
-
-    // Rate limit — back off and retry.
-    if (RATE_LIMIT_CODES.has(code)) {
-      if (attempt >= MAX_RETRIES) {
-        throw new Error(
-          `Meta rate limit exceeded after ${MAX_RETRIES} retries (code ${code}): ${message}`,
-        );
-      }
-      const delay = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
-      console.warn(
-        `[DataIngestion] Rate limit (code ${code}), retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`,
-      );
-      await sleep(delay);
-      return metaFetch<T>(url, attempt + 1);
-    }
-
-    // Any other API error.
-    throw new Error(`Meta API error (code ${code}): ${message}`);
-  }
-
-  return body;
-}
-
-/**
- * Paginate through all pages of a Meta Graph API endpoint and collect every
- * item from the `data` array.
- */
-async function metaFetchAll<T>(firstUrl: string): Promise<T[]> {
-  const items: T[] = [];
-  let url: string | undefined = firstUrl;
-
-  while (url) {
-    const page: MetaApiResponse<T> = await metaFetch<T>(url);
-    if (page.data) {
-      items.push(...page.data);
-    }
-    url = page.paging?.next;
-  }
-
-  return items;
-}
-
-/**
- * Sum the `value` of all actions whose `action_type` maps to a lead event.
- */
-function extractLeads(actions?: MetaInsightAction[]): number {
-  if (!actions) return 0;
-  const LEAD_TYPES = new Set(["lead", "onsite_conversion.lead_grouped"]);
-  return actions
-    .filter((a) => LEAD_TYPES.has(a.action_type))
-    .reduce((sum, a) => sum + (parseInt(a.value, 10) || 0), 0);
-}
+/** Meta returns budgets in the account currency's minor unit (cents for USD/EGP/SAR). */
+const toMajorUnits = (minor?: string) =>
+  minor ? (parseInt(minor, 10) / 100).toFixed(4) : null;
 
 /**
  * Format a Date as "YYYY-MM-DD" in UTC.
@@ -235,29 +134,23 @@ async function syncIntegration(
   if (!db) throw new Error("Database not available");
 
   const { accessToken, metaAccountId, id: integrationId } = integration;
-  const accountRef = `act_${metaAccountId}`;
+  const accountRef = `act_${stripActPrefix(metaAccountId)}`;
 
   let campaignsUpserted = 0;
   let adSetsUpserted = 0;
   let metricsRowsUpserted = 0;
 
   // ── 1. Campaigns ────────────────────────────────────────────────────────────
-  const campaignFields = "id,name,objective,status,daily_budget";
-  const campaignUrl =
-    `${GRAPH_API_BASE}/${accountRef}/campaigns` +
-    `?fields=${campaignFields}` +
-    `&limit=200` +
-    `&access_token=${accessToken}`;
-
-  const metaCampaigns = await metaFetchAll<MetaCampaign>(campaignUrl);
+  const metaCampaigns = await graphGetAll<MetaCampaign>(`${accountRef}/campaigns`, accessToken, {
+    fields: "id,name,objective,status,daily_budget",
+    limit: 200,
+  });
 
   // Map metaCampaignId → internal engine_campaigns.id for ad set FK resolution.
   const campaignIdMap = new Map<string, number>();
 
   for (const c of metaCampaigns) {
-    const status = (["ACTIVE", "PAUSED", "DELETED", "ARCHIVED"].includes(c.status)
-      ? c.status
-      : "PAUSED") as "ACTIVE" | "PAUSED" | "DELETED" | "ARCHIVED";
+    const status = normStatus(c.status);
 
     const values = {
       workspaceId,
@@ -266,9 +159,7 @@ async function syncIntegration(
       name: c.name,
       objective: c.objective ?? null,
       status,
-      dailyBudget: c.daily_budget
-        ? (parseInt(c.daily_budget, 10) / 100).toFixed(4)
-        : null,
+      dailyBudget: toMajorUnits(c.daily_budget),
     };
 
     await db
@@ -297,14 +188,10 @@ async function syncIntegration(
   }
 
   // ── 2. Ad Sets ──────────────────────────────────────────────────────────────
-  const adSetFields = "id,name,campaign_id,status,daily_budget";
-  const adSetUrl =
-    `${GRAPH_API_BASE}/${accountRef}/adsets` +
-    `?fields=${adSetFields}` +
-    `&limit=200` +
-    `&access_token=${accessToken}`;
-
-  const metaAdSets = await metaFetchAll<MetaAdSet>(adSetUrl);
+  const metaAdSets = await graphGetAll<MetaAdSet>(`${accountRef}/adsets`, accessToken, {
+    fields: "id,name,campaign_id,status,daily_budget",
+    limit: 200,
+  });
 
   // Map metaAdSetId → internal engine_ad_sets.id for metrics FK resolution.
   const adSetIdMap = new Map<string, number>();
@@ -313,9 +200,7 @@ async function syncIntegration(
     const internalCampaignId = campaignIdMap.get(s.campaign_id);
     if (!internalCampaignId) continue; // orphaned ad set — skip
 
-    const status = (["ACTIVE", "PAUSED", "DELETED", "ARCHIVED"].includes(s.status)
-      ? s.status
-      : "PAUSED") as "ACTIVE" | "PAUSED" | "DELETED" | "ARCHIVED";
+    const status = normStatus(s.status);
 
     const values = {
       workspaceId,
@@ -323,9 +208,7 @@ async function syncIntegration(
       metaAdSetId: s.id,
       name: s.name,
       status,
-      dailyBudget: s.daily_budget
-        ? (parseInt(s.daily_budget, 10) / 100).toFixed(4)
-        : null,
+      dailyBudget: toMajorUnits(s.daily_budget),
     };
 
     await db
@@ -357,18 +240,17 @@ async function syncIntegration(
   const since = toDateString(sinceDate);
   const until = toDateString(new Date());
 
-  const insightFields =
-    "campaign_id,impressions,clicks,spend,reach,frequency,actions";
-  const campaignInsightUrl =
-    `${GRAPH_API_BASE}/${accountRef}/insights` +
-    `?fields=${insightFields}` +
-    `&level=campaign` +
-    `&time_increment=1` +
-    `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
-    `&limit=500` +
-    `&access_token=${accessToken}`;
+  const insightParams = {
+    time_increment: 1,
+    time_range: JSON.stringify({ since, until }),
+    limit: 500,
+  };
 
-  const campaignInsights = await metaFetchAll<MetaInsight>(campaignInsightUrl);
+  const campaignInsights = await graphGetAll<MetaInsight>(`${accountRef}/insights`, accessToken, {
+    ...insightParams,
+    fields: "campaign_id,impressions,clicks,spend,reach,frequency,actions",
+    level: "campaign",
+  });
 
   for (const ins of campaignInsights) {
     const internalCampaignId = ins.campaign_id
@@ -422,16 +304,11 @@ async function syncIntegration(
   }
 
   // ── 4. Daily Insights — Ad Set level ────────────────────────────────────────
-  const adSetInsightUrl =
-    `${GRAPH_API_BASE}/${accountRef}/insights` +
-    `?fields=adset_id,impressions,clicks,spend,reach,frequency,actions` +
-    `&level=adset` +
-    `&time_increment=1` +
-    `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
-    `&limit=500` +
-    `&access_token=${accessToken}`;
-
-  const adSetInsights = await metaFetchAll<MetaInsight>(adSetInsightUrl);
+  const adSetInsights = await graphGetAll<MetaInsight>(`${accountRef}/insights`, accessToken, {
+    ...insightParams,
+    fields: "adset_id,impressions,clicks,spend,reach,frequency,actions",
+    level: "adset",
+  });
 
   for (const ins of adSetInsights) {
     const internalAdSetId = ins.adset_id
@@ -516,6 +393,7 @@ export async function runDataIngestion(
   let totalAdSets = 0;
   let totalMetrics = 0;
   let integrationsProcessed = 0;
+  const failures: unknown[] = [];
 
   for (const integration of activeIntegrations) {
     console.log(
@@ -551,9 +429,7 @@ export async function runDataIngestion(
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const isTokenExpired =
-        err instanceof Error &&
-        (err as NodeJS.ErrnoException).code === "META_TOKEN_EXPIRED";
+      const isTokenExpired = err instanceof MetaApiError && err.isTokenExpired;
 
       await db
         .update(integrations)
@@ -567,10 +443,14 @@ export async function runDataIngestion(
         `[DataIngestion] Integration ${integration.id} FAILED: ${message}`,
       );
 
-      // Re-throw so the pipeline orchestrator records this as a step failure.
-      throw err;
+      // Keep syncing the remaining integrations; one bad token must not
+      // block every other ad account in the workspace.
+      failures.push(err);
     }
   }
+
+  // Re-throw so the pipeline orchestrator records this as a step failure.
+  if (failures.length > 0) throw failures[0];
 
   return {
     integrationsProcessed,

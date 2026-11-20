@@ -2,6 +2,14 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import {
+  graphGet,
+  graphGetAll,
+  extractLeads,
+  extractPurchases,
+  extractPurchaseValue,
+  stripActPrefix,
+} from "./meta/graph";
 import { workspaceRouter } from "./routers/workspace";
 import { dataSourcesRouter as engineDataSourcesRouter } from "./routers/dataSources";
 import { adsRouter as engineAdsRouter } from "./routers/ads";
@@ -79,7 +87,7 @@ export const appRouter = router({
 
   // ─── Dashboard ─────────────────────────────────────────────────────────────
   dashboard: router({
-    summary: publicProcedure.query(async () => {
+    summary: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return null;
 
@@ -127,7 +135,7 @@ export const appRouter = router({
       };
     }),
 
-    funnelHealth: publicProcedure.query(async () => {
+    funnelHealth: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return null;
 
@@ -151,7 +159,7 @@ export const appRouter = router({
       };
     }),
 
-    revenueByCountry: publicProcedure.query(async () => {
+    revenueByCountry: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -166,7 +174,7 @@ export const appRouter = router({
         .orderBy(desc(sql`SUM(revenue)`));
     }),
 
-    revenueByAgent: publicProcedure.query(async () => {
+    revenueByAgent: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -184,7 +192,7 @@ export const appRouter = router({
 
   // ─── Ads Performance ───────────────────────────────────────────────────────
   ads: router({
-    campaigns: publicProcedure.query(async () => {
+    campaigns: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       const rows = await db.select({
@@ -212,7 +220,7 @@ export const appRouter = router({
       return rows;
     }),
 
-    insights: publicProcedure.input(z.object({ days: z.number().default(30) })).query(async ({ input }) => {
+    insights: protectedProcedure.input(z.object({ days: z.number().default(30) })).query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -231,7 +239,7 @@ export const appRouter = router({
         .orderBy(sql`DATE(date)`);
     }),
 
-    byCountry: publicProcedure.query(async () => {
+    byCountry: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -248,7 +256,7 @@ export const appRouter = router({
         .orderBy(desc(sql`SUM(spend)`));
     }),
 
-    adSets: publicProcedure.query(async () => {
+    adSets: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -274,7 +282,7 @@ export const appRouter = router({
 
   // ─── Lead Quality ──────────────────────────────────────────────────────────
   leads: router({
-    list: publicProcedure.input(z.object({
+    list: protectedProcedure.input(z.object({
       limit: z.number().default(50),
       offset: z.number().default(0),
       status: z.string().optional(),
@@ -300,7 +308,7 @@ export const appRouter = router({
       return { data, total };
     }),
 
-    stats: publicProcedure.query(async () => {
+    stats: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return null;
       const [stats] = await db.select({
@@ -318,7 +326,7 @@ export const appRouter = router({
       return stats;
     }),
 
-    byCountry: publicProcedure.query(async () => {
+    byCountry: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -332,7 +340,7 @@ export const appRouter = router({
         .orderBy(desc(count()));
     }),
 
-    byCampaign: publicProcedure.query(async () => {
+    byCampaign: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -352,7 +360,7 @@ export const appRouter = router({
 
   // ─── Sales Performance ─────────────────────────────────────────────────────
   sales: router({
-    agents: publicProcedure.query(async () => {
+    agents: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(salesAgents)
@@ -360,7 +368,7 @@ export const appRouter = router({
         .orderBy(desc(salesAgents.totalRevenue));
     }),
 
-    agentActivities: publicProcedure.input(z.object({ agentId: z.number() })).query(async ({ input }) => {
+    agentActivities: protectedProcedure.input(z.object({ agentId: z.number() })).query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(salesActivities)
@@ -369,7 +377,7 @@ export const appRouter = router({
         .limit(20);
     }),
 
-    activityStats: publicProcedure.query(async () => {
+    activityStats: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -386,7 +394,7 @@ export const appRouter = router({
         .orderBy(desc(count()));
     }),
 
-    teamStats: publicProcedure.query(async () => {
+    teamStats: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return null;
       const [stats] = await db.select({
@@ -404,7 +412,7 @@ export const appRouter = router({
 
   // ─── Funnel Diagnosis ──────────────────────────────────────────────────────
   funnel: router({
-    bottlenecks: publicProcedure.query(async () => {
+    bottlenecks: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(funnelBottlenecks)
@@ -412,7 +420,7 @@ export const appRouter = router({
         .orderBy(desc(funnelBottlenecks.revenueImpact));
     }),
 
-    overview: publicProcedure.query(async () => {
+    overview: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return null;
 
@@ -453,7 +461,7 @@ export const appRouter = router({
       return { adsMetrics, leadsMetrics, salesMetrics, countryData };
     }),
 
-    countryAnalysis: publicProcedure.query(async () => {
+    countryAnalysis: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       const adsData = await db.select({
@@ -486,7 +494,7 @@ export const appRouter = router({
 
   // ─── Recommendations ───────────────────────────────────────────────────────
   recommendations: router({
-    list: publicProcedure.query(async () => {
+    list: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(recommendations)
@@ -580,7 +588,7 @@ Provide exactly 3 actionable insights in JSON format: [{"title":"...","insight":
 
   // ─── Daily Summary ─────────────────────────────────────────────────────────
   dailySummary: router({
-    latest: publicProcedure.query(async () => {
+    latest: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return null;
       const [latest] = await db.select().from(dailySummaries)
@@ -588,7 +596,7 @@ Provide exactly 3 actionable insights in JSON format: [{"title":"...","insight":
       return latest;
     }),
 
-    list: publicProcedure.query(async () => {
+    list: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(dailySummaries)
@@ -641,14 +649,14 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
 
   // ─── Weekly Reports ────────────────────────────────────────────────────────
   weeklyReports: router({
-    list: publicProcedure.query(async () => {
+    list: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(weeklyReports)
         .orderBy(desc(weeklyReports.weekStart)).limit(4);
     }),
 
-    latest: publicProcedure.query(async () => {
+    latest: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return null;
       const [latest] = await db.select().from(weeklyReports)
@@ -656,7 +664,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       return latest;
     }),
 
-    trend: publicProcedure.query(async () => {
+    trend: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -673,7 +681,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
 
   // ─── Forecasting ───────────────────────────────────────────────────────────
   forecast: router({
-    revenue: publicProcedure.query(async () => {
+    revenue: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return null;
 
@@ -729,7 +737,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
 
   // ─── Leaderboards ──────────────────────────────────────────────────────────
   leaderboard: router({
-    agents: publicProcedure.query(async () => {
+    agents: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(salesAgents)
@@ -737,7 +745,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         .orderBy(desc(salesAgents.totalRevenue));
     }),
 
-    campaigns: publicProcedure.query(async () => {
+    campaigns: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -765,10 +773,12 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
   // ─── Data Sources (legacy pre-v1.1 connections) ─────────────────────────────────
   dataSources: router({
     // ─ Connections ─────────────────────────────────────────────────────────────────
-    listConnections: publicProcedure.query(async () => {
+    listConnections: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
-      return db.select().from(dataConnections).orderBy(desc(dataConnections.updatedAt));
+      // Never send access tokens to the browser.
+      const rows = await db.select().from(dataConnections).orderBy(desc(dataConnections.updatedAt));
+      return rows.map(({ accessToken, ...rest }) => ({ ...rest, hasToken: !!accessToken }));
     }),
 
     saveConnection: protectedProcedure.input(z.object({
@@ -809,13 +819,10 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
     })).mutation(async ({ input }) => {
       // Call Meta Graph API to verify the token and account
       try {
-        const accountId = input.adAccountId.startsWith('act_') ? input.adAccountId : `act_${input.adAccountId}`;
-        const url = `https://graph.facebook.com/v19.0/${accountId}?fields=id,name,currency,account_status&access_token=${input.accessToken}`;
-        const res = await fetch(url);
-        const data = await res.json() as any;
-        if (data.error) {
-          return { success: false, error: data.error.message, accountName: null };
-        }
+        const accountId = `act_${stripActPrefix(input.adAccountId)}`;
+        const data = await graphGet<{ name: string; currency: string }>(accountId, input.accessToken, {
+          fields: 'id,name,currency,account_status',
+        }, { maxRetries: 1 });
         return { success: true, error: null, accountName: data.name, currency: data.currency };
       } catch (e: any) {
         return { success: false, error: e.message || 'Network error', accountName: null };
@@ -835,24 +842,20 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       await db.update(dataConnections).set({ status: 'syncing' }).where(eq(dataConnections.id, input.connectionId));
 
       try {
-        const accountId = conn.adAccountId!.startsWith('act_') ? conn.adAccountId! : `act_${conn.adAccountId}`;
+        const accountId = `act_${stripActPrefix(conn.adAccountId!)}`;
         const since = new Date();
         since.setDate(since.getDate() - (conn.syncDays || 30));
         const sinceStr = since.toISOString().split('T')[0];
         const today = new Date().toISOString().split('T')[0];
 
-        const fields = 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,clicks,ctr,cpc,cpm,reach,frequency,date_start,actions,action_values,cost_per_action_type';
-        const url = `https://graph.facebook.com/v19.0/${accountId}/insights?fields=${fields}&time_range={"since":"${sinceStr}","until":"${today}"}&time_increment=1&level=campaign&limit=500&access_token=${conn.accessToken}`;
-
-        const res = await fetch(url);
-        const json = await res.json() as any;
-
-        if (json.error) {
-          await db.update(dataConnections).set({ status: 'error', lastError: json.error.message }).where(eq(dataConnections.id, input.connectionId));
-          return { success: false, error: json.error.message, rowsImported: 0 };
-        }
-
-        const rows = json.data || [];
+        const fields = 'campaign_id,campaign_name,spend,impressions,clicks,ctr,cpc,cpm,reach,frequency,date_start,actions,action_values';
+        const rows = await graphGetAll<any>(`${accountId}/insights`, conn.accessToken!, {
+          fields,
+          time_range: JSON.stringify({ since: sinceStr, until: today }),
+          time_increment: 1,
+          level: 'campaign',
+          limit: 500,
+        });
         let imported = 0;
 
         for (const row of rows) {
@@ -873,14 +876,16 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
             campaignDbId = (ins as any).insertId;
           }
 
-          const leads_count = row.actions?.find((a: any) => a.action_type === 'lead')?.value || 0;
-          const conversions_count = row.actions?.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0;
-          const revenue = row.action_values?.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value || 0;
+          const leads_count = extractLeads(row.actions);
+          const conversions_count = extractPurchases(row.actions);
+          const revenue = extractPurchaseValue(row.action_values);
           const cpl = leads_count > 0 ? (parseFloat(row.spend || 0) / leads_count) : 0;
 
+          const rowDate = new Date(`${row.date_start}T00:00:00.000Z`);
+          await db.delete(adInsights).where(and(eq(adInsights.campaignId, campaignDbId), eq(adInsights.date, rowDate)));
           await db.insert(adInsights).values({
             campaignId: campaignDbId,
-            date: new Date(row.date_start),
+            date: rowDate,
             spend: String(row.spend || 0),
             impressions: parseInt(row.impressions || 0),
             clicks: parseInt(row.clicks || 0),
@@ -889,10 +894,10 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
             cpm: String(parseFloat(row.cpm || 0)),
             reach: parseInt(row.reach || 0),
             frequency: String(parseFloat(row.frequency || 0)),
-            leads: parseInt(leads_count),
+            leads: leads_count,
             costPerLead: String(cpl),
-            conversions: parseInt(conversions_count),
-            revenue: String(parseFloat(revenue)),
+            conversions: conversions_count,
+            revenue: String(revenue),
           } as any);
           imported++;
         }
@@ -919,7 +924,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
     }),
 
     // ─ Import Jobs ─────────────────────────────────────────────────────────────────
-    listImports: publicProcedure.query(async () => {
+    listImports: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(importJobs).orderBy(desc(importJobs.createdAt)).limit(20);
@@ -1030,17 +1035,15 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       await db.delete(importJobs).where(eq(importJobs.id, input.id));
       return { success: true };
     }),
-    fetchAdAccounts: publicProcedure
+    fetchAdAccounts: protectedProcedure
       .input(z.object({ accessToken: z.string().min(10) }))
       .mutation(async ({ input }) => {
-        // Call Meta Graph API to get all ad accounts accessible by this token
-        const url = `https://graph.facebook.com/v19.0/me/adaccounts?fields=id,name,account_id,account_status,currency,timezone_name,business&limit=100&access_token=${encodeURIComponent(input.accessToken)}`;
-        const res = await fetch(url);
-        const json = await res.json() as any;
-        if (json.error) {
-          throw new Error(json.error.message || 'Failed to fetch ad accounts from Meta API');
-        }
-        const accounts = (json.data || []).map((acc: any) => ({
+        // Call Meta Graph API to get all ad accounts accessible by this token (paginated)
+        const data = await graphGetAll<any>('me/adaccounts', input.accessToken, {
+          fields: 'id,name,account_id,account_status,currency,timezone_name,business',
+          limit: 100,
+        }, { maxRetries: 1 });
+        const accounts = data.map((acc: any) => ({
           id: acc.id,                          // e.g. "act_123456789"
           accountId: acc.account_id,           // numeric string e.g. "123456789"
           name: acc.name,
@@ -1052,8 +1055,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         // Also fetch the user's name for display
         let userName = '';
         try {
-          const meRes = await fetch(`https://graph.facebook.com/v19.0/me?fields=name&access_token=${encodeURIComponent(input.accessToken)}`);
-          const me = await meRes.json() as any;
+          const me = await graphGet<{ name?: string }>('me', input.accessToken, { fields: 'name' }, { maxRetries: 0 });
           userName = me.name || '';
         } catch { /* non-critical */ }
         return { accounts, userName, total: accounts.length };
@@ -1070,15 +1072,19 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         const syncDays = conn.syncDays || 30;
         const endDate = new Date().toISOString().split('T')[0];
         const startDate = new Date(Date.now() - syncDays * 86400000).toISOString().split('T')[0];
-        const fields = 'campaign_id,campaign_name,spend,impressions,clicks,ctr,cpc,cpm,reach,actions,action_values';
-        const url = `https://graph.facebook.com/v19.0/act_${conn.adAccountId}/insights?fields=${fields}&time_range={"since":"${startDate}","until":"${endDate}"}&level=campaign&limit=500&access_token=${conn.accessToken}`;
+        const fields = 'campaign_id,campaign_name,spend,impressions,clicks,ctr,cpc,cpm,reach,actions,action_values,date_start';
         let imported = 0;
         let errors = 0;
         try {
-          const res = await fetch(url);
-          const json = await res.json() as any;
-          if (json.error) throw new Error(json.error.message);
-          const rows = json.data || [];
+          // time_increment=1 → one row per campaign per day (previously the whole
+          // period's totals were stored under today's date on every sync).
+          const rows = await graphGetAll<any>(`act_${stripActPrefix(conn.adAccountId!)}/insights`, conn.accessToken!, {
+            fields,
+            time_range: JSON.stringify({ since: startDate, until: endDate }),
+            time_increment: 1,
+            level: 'campaign',
+            limit: 500,
+          });
           for (const row of rows) {
             try {
               const spend = parseFloat(row.spend || '0');
@@ -1088,8 +1094,9 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
               const cpc = parseFloat(row.cpc || '0');
               const cpm = parseFloat(row.cpm || '0');
               const reach = parseInt(row.reach || '0');
-              const leads = (row.actions || []).find((a: any) => a.action_type === 'lead')?.value || 0;
-              const revenue = (row.action_values || []).find((a: any) => a.action_type === 'purchase')?.value || 0;
+              const leads = extractLeads(row.actions);
+              const revenue = extractPurchaseValue(row.action_values);
+              const rowDate = row.date_start ? new Date(`${row.date_start}T00:00:00.000Z`) : new Date();
               const existingCampaigns = await db.select({ id: campaigns.id }).from(campaigns).where(eq(campaigns.campaignId, String(row.campaign_id))).limit(1);
               let campaignDbId: number;
               if (existingCampaigns.length > 0) {
@@ -1098,7 +1105,9 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
                 const [ins] = await db.insert(campaigns).values({ campaignId: String(row.campaign_id), accountId: conn.id, name: row.campaign_name || 'Unknown', status: 'active' });
                 campaignDbId = (ins as any).insertId;
               }
-              await db.insert(adInsights).values({ campaignId: campaignDbId, date: new Date(), spend: String(spend), impressions, clicks, ctr: String(ctr), cpc: String(cpc), cpm: String(cpm), reach, leads: parseInt(String(leads)), costPerLead: leads > 0 ? String(spend / parseInt(String(leads))) : '0', conversions: 0, revenue: String(revenue) } as any);
+              // Replace any existing row for this campaign/day so re-syncs don't duplicate.
+              await db.delete(adInsights).where(and(eq(adInsights.campaignId, campaignDbId), eq(adInsights.date, rowDate)));
+              await db.insert(adInsights).values({ campaignId: campaignDbId, date: rowDate, spend: String(spend), impressions, clicks, ctr: String(ctr), cpc: String(cpc), cpm: String(cpm), reach, leads, costPerLead: leads > 0 ? String(spend / leads) : '0', conversions: extractPurchases(row.actions), revenue: String(revenue) } as any);
               imported++;
             } catch { errors++; }
           }
@@ -1123,7 +1132,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         throw e;
       }
     }),
-    connectionStatus: publicProcedure.query(async () => {
+    connectionStatus: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return { hasActiveConnection: false, lastSyncedAt: null as Date | null, connectionName: null as string | null };
       const all = await db
@@ -1145,7 +1154,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
      * Overall KPI summary across all imported adInsights rows.
      * Accepts an optional date range (ISO strings). Defaults to last 30 days.
      */
-    summary: publicProcedure
+    summary: protectedProcedure
       .input(z.object({
         from: z.string().optional(), // YYYY-MM-DD
         to: z.string().optional(),   // YYYY-MM-DD
@@ -1188,7 +1197,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
     /**
      * Daily aggregated metrics for trend charts.
      */
-    dailyTrend: publicProcedure
+    dailyTrend: protectedProcedure
       .input(z.object({
         from: z.string().optional(),
         to:   z.string().optional(),
@@ -1232,7 +1241,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
     /**
      * Per-campaign aggregated metrics for the breakdown table.
      */
-    campaignBreakdown: publicProcedure
+    campaignBreakdown: protectedProcedure
       .input(z.object({
         from:  z.string().optional(),
         to:    z.string().optional(),
@@ -1282,7 +1291,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
      * Spend, leads, and CPL grouped by country for the given date range.
      * Rows with a NULL/empty country are grouped under "Unknown".
      */
-    countryBreakdown: publicProcedure
+    countryBreakdown: protectedProcedure
       .input(z.object({
         from: z.string().optional(),
         to:   z.string().optional(),
@@ -1318,10 +1327,11 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
 
   // ─── WhatsApp Webhook Settings ────────────────────────────────────────────
   whatsapp: router({
-    getConfig: publicProcedure.query(() => {
+    getConfig: protectedProcedure.query(() => {
       return {
         webhookUrl: null as string | null, // will be set after publish
-        verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || "growth_os_verify_token",
+        // Shown only to signed-in users; there is no insecure default any more.
+        verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || null,
         hasAppSecret: !!process.env.WHATSAPP_APP_SECRET,
         endpointPath: "/api/webhook/whatsapp",
         instructions: [
@@ -1334,7 +1344,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       };
     }),
 
-    getRecentLeads: publicProcedure.query(async () => {
+    getRecentLeads: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       // Return leads that came from WhatsApp (stored in contactInfo.channel)
