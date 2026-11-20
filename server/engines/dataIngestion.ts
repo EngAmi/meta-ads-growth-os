@@ -178,7 +178,7 @@ async function syncIntegration(
     const [row] = await db
       .select({ id: engineCampaigns.id })
       .from(engineCampaigns)
-      .where(eq(engineCampaigns.metaCampaignId, c.id))
+      .where(and(eq(engineCampaigns.workspaceId, workspaceId), eq(engineCampaigns.metaCampaignId, c.id)))
       .limit(1);
 
     if (row) {
@@ -225,7 +225,7 @@ async function syncIntegration(
     const [row] = await db
       .select({ id: engineAdSets.id })
       .from(engineAdSets)
-      .where(eq(engineAdSets.metaAdSetId, s.id))
+      .where(and(eq(engineAdSets.workspaceId, workspaceId), eq(engineAdSets.metaAdSetId, s.id)))
       .limit(1);
 
     if (row) {

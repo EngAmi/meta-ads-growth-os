@@ -7,6 +7,7 @@ import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import { getDb } from "./db";
 import { leads } from "../drizzle/schema";
+import { getOwnerWorkspaceId } from "./routers/_workspace";
 
 // ─── Lead Scoring Engine ──────────────────────────────────────────────────────
 
@@ -192,6 +193,8 @@ export function registerWhatsAppWebhook(app: any) {
             }
 
             await db.insert(leads).values({
+              // Inbound webhooks have no session: attribute to the app owner's workspace.
+              workspaceId: await getOwnerWorkspaceId(),
               source: "meta_ads", // closest available source enum value
               phone: phone,
               name: name,

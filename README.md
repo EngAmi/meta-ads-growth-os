@@ -180,7 +180,13 @@ CRON_SCHEDULE=0 0 * * *
 pnpm test
 ```
 
-The test suite covers 154 tests across 6 suites: auth & access control, diagnostic engine (97 unit tests), nightly scheduler, data pipeline, tRPC procedures, and the Meta Graph client / webhook signature checks.
+Run the workspace-isolation integration test against a disposable, migrated database:
+
+```bash
+TEST_DATABASE_URL=mysql://user:pass@localhost:3306/growthos_test pnpm test
+```
+
+The test suite covers 157 tests across 7 suites (the isolation suite is skipped without `TEST_DATABASE_URL`): auth & access control, diagnostic engine (97 unit tests), nightly scheduler, data pipeline, tRPC procedures, and the Meta Graph client / webhook signature checks.
 
 ---
 

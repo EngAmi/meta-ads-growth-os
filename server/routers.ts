@@ -1,7 +1,8 @@
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { publicProcedure, router } from "./_core/trpc";
+import { workspaceProcedure } from "./routers/_workspace";
 import {
   graphGet,
   graphGetAll,
@@ -87,7 +88,7 @@ export const appRouter = router({
 
   // ─── Dashboard ─────────────────────────────────────────────────────────────
   dashboard: router({
-    summary: protectedProcedure.query(async () => {
+    summary: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return null;
 
@@ -98,31 +99,31 @@ export const appRouter = router({
         totalImpressions: sql<number>`COALESCE(SUM(impressions),0)`,
         totalClicks: sql<number>`COALESCE(SUM(clicks),0)`,
         totalConversions: sql<number>`COALESCE(SUM(conversions),0)`,
-      }).from(adInsights).where(gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`));
+      }).from(adInsights).where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`)));
 
       const [leadsData] = await db.select({
         total: count(),
         converted: sql<number>`SUM(CASE WHEN status='converted' THEN 1 ELSE 0 END)`,
         fake: sql<number>`SUM(CASE WHEN isFake=1 THEN 1 ELSE 0 END)`,
         highIntent: sql<number>`SUM(CASE WHEN intentLevel='high' THEN 1 ELSE 0 END)`,
-      }).from(leads);
+      }).from(leads).where(eq(leads.workspaceId, ctx.workspaceId));
 
       const [agentsData] = await db.select({
         avgConversion: avg(salesAgents.conversionRate),
         totalRevenue: sum(salesAgents.totalRevenue),
-      }).from(salesAgents).where(eq(salesAgents.status, 'active'));
+      }).from(salesAgents).where(and(eq(salesAgents.status, 'active'), eq(salesAgents.workspaceId, ctx.workspaceId)));
 
       const topBottlenecks = await db.select().from(funnelBottlenecks)
-        .where(eq(funnelBottlenecks.isResolved, false))
+        .where(and(eq(funnelBottlenecks.isResolved, false), eq(funnelBottlenecks.workspaceId, ctx.workspaceId)))
         .orderBy(desc(funnelBottlenecks.revenueImpact))
         .limit(5);
 
       const topRecs = await db.select().from(recommendations)
-        .where(eq(recommendations.status, 'pending'))
+        .where(and(eq(recommendations.status, 'pending'), eq(recommendations.workspaceId, ctx.workspaceId)))
         .orderBy(desc(recommendations.estimatedImpact))
         .limit(5);
 
-      const [todaySummary] = await db.select().from(dailySummaries)
+      const [todaySummary] = await db.select().from(dailySummaries).where(eq(dailySummaries.workspaceId, ctx.workspaceId))
         .orderBy(desc(dailySummaries.date)).limit(1);
 
       return {
@@ -135,7 +136,7 @@ export const appRouter = router({
       };
     }),
 
-    funnelHealth: protectedProcedure.query(async () => {
+    funnelHealth: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return null;
 
@@ -144,10 +145,10 @@ export const appRouter = router({
         totalLeads: sql<number>`COALESCE(SUM(leads),0)`,
         totalConversions: sql<number>`COALESCE(SUM(conversions),0)`,
         totalRevenue: sql<number>`COALESCE(SUM(revenue),0)`,
-      }).from(adInsights).where(gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`));
+      }).from(adInsights).where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`)));
 
-      const [leadsCount] = await db.select({ total: count() }).from(leads);
-      const [convertedCount] = await db.select({ total: count() }).from(leads).where(eq(leads.status, 'converted'));
+      const [leadsCount] = await db.select({ total: count() }).from(leads).where(eq(leads.workspaceId, ctx.workspaceId));
+      const [convertedCount] = await db.select({ total: count() }).from(leads).where(and(eq(leads.workspaceId, ctx.workspaceId), eq(leads.status, 'converted')));
 
       return {
         adsToLeads: data.totalLeads > 0 ? (data.totalLeads / Math.max(data.totalSpend, 1) * 100).toFixed(2) : 0,
@@ -159,7 +160,7 @@ export const appRouter = router({
       };
     }),
 
-    revenueByCountry: protectedProcedure.query(async () => {
+    revenueByCountry: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -169,12 +170,12 @@ export const appRouter = router({
         leads: sql<number>`COALESCE(SUM(leads),0)`,
         conversions: sql<number>`COALESCE(SUM(conversions),0)`,
       }).from(adInsights)
-        .where(gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`))
+        .where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`)))
         .groupBy(adInsights.country)
         .orderBy(desc(sql`SUM(revenue)`));
     }),
 
-    revenueByAgent: protectedProcedure.query(async () => {
+    revenueByAgent: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -185,14 +186,14 @@ export const appRouter = router({
         totalLeads: salesAgents.totalLeads,
         totalConversions: salesAgents.totalConversions,
       }).from(salesAgents)
-        .where(eq(salesAgents.status, 'active'))
+        .where(and(eq(salesAgents.status, 'active'), eq(salesAgents.workspaceId, ctx.workspaceId)))
         .orderBy(desc(salesAgents.totalRevenue));
     }),
   }),
 
   // ─── Ads Performance ───────────────────────────────────────────────────────
   ads: router({
-    campaigns: protectedProcedure.query(async () => {
+    campaigns: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       const rows = await db.select({
@@ -215,12 +216,13 @@ export const appRouter = router({
           eq(adInsights.campaignId, campaigns.id),
           gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`)
         ))
+        .where(eq(campaigns.workspaceId, ctx.workspaceId))
         .groupBy(campaigns.id)
         .orderBy(desc(sql`SUM(${adInsights.spend})`));
       return rows;
     }),
 
-    insights: protectedProcedure.input(z.object({ days: z.number().default(30) })).query(async ({ input }) => {
+    insights: workspaceProcedure.input(z.object({ days: z.number().default(30) })).query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -234,12 +236,12 @@ export const appRouter = router({
         avgCtr: sql<number>`COALESCE(AVG(ctr),0)`,
         avgCpl: sql<number>`COALESCE(AVG(costPerLead),0)`,
       }).from(adInsights)
-        .where(gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL ${input.days} DAY)`))
+        .where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL ${input.days} DAY)`)))
         .groupBy(sql`DATE(date)`)
         .orderBy(sql`DATE(date)`);
     }),
 
-    byCountry: protectedProcedure.query(async () => {
+    byCountry: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -251,12 +253,12 @@ export const appRouter = router({
         avgCpl: sql<number>`COALESCE(AVG(costPerLead),0)`,
         avgCtr: sql<number>`COALESCE(AVG(ctr),0)`,
       }).from(adInsights)
-        .where(gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`))
+        .where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`)))
         .groupBy(adInsights.country)
         .orderBy(desc(sql`SUM(spend)`));
     }),
 
-    adSets: protectedProcedure.query(async () => {
+    adSets: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -275,6 +277,7 @@ export const appRouter = router({
           eq(adInsights.adSetId, adSets.id),
           gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`)
         ))
+        .where(eq(adSets.workspaceId, ctx.workspaceId))
         .groupBy(adSets.id)
         .orderBy(desc(sql`SUM(${adInsights.spend})`));
     }),
@@ -282,16 +285,16 @@ export const appRouter = router({
 
   // ─── Lead Quality ──────────────────────────────────────────────────────────
   leads: router({
-    list: protectedProcedure.input(z.object({
+    list: workspaceProcedure.input(z.object({
       limit: z.number().default(50),
       offset: z.number().default(0),
       status: z.string().optional(),
       intent: z.string().optional(),
       country: z.string().optional(),
-    })).query(async ({ input }) => {
+    })).query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) return { data: [], total: 0 };
-      const conditions = [];
+      const conditions = [eq(leads.workspaceId, ctx.workspaceId)];
       if (input.status) conditions.push(eq(leads.status, input.status as any));
       if (input.intent) conditions.push(eq(leads.intentLevel, input.intent as any));
       if (input.country) conditions.push(eq(leads.country, input.country));
@@ -308,7 +311,7 @@ export const appRouter = router({
       return { data, total };
     }),
 
-    stats: protectedProcedure.query(async () => {
+    stats: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return null;
       const [stats] = await db.select({
@@ -322,11 +325,11 @@ export const appRouter = router({
         lowIntent: sql<number>`SUM(CASE WHEN intentLevel='low' THEN 1 ELSE 0 END)`,
         avgScore: avg(leads.leadScore),
         avgResponseTime: avg(leads.responseTimeSeconds),
-      }).from(leads);
+      }).from(leads).where(eq(leads.workspaceId, ctx.workspaceId));
       return stats;
     }),
 
-    byCountry: protectedProcedure.query(async () => {
+    byCountry: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -336,11 +339,12 @@ export const appRouter = router({
         fake: sql<number>`SUM(CASE WHEN isFake=1 THEN 1 ELSE 0 END)`,
         avgScore: avg(leads.leadScore),
       }).from(leads)
+        .where(eq(leads.workspaceId, ctx.workspaceId))
         .groupBy(leads.country)
         .orderBy(desc(count()));
     }),
 
-    byCampaign: protectedProcedure.query(async () => {
+    byCampaign: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -353,6 +357,7 @@ export const appRouter = router({
         conversionRate: sql<number>`(SUM(CASE WHEN ${leads.status}='converted' THEN 1 ELSE 0 END) / COUNT(*)) * 100`,
       }).from(leads)
         .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
+        .where(eq(leads.workspaceId, ctx.workspaceId))
         .groupBy(leads.campaignId, campaigns.name)
         .orderBy(desc(count()));
     }),
@@ -360,24 +365,24 @@ export const appRouter = router({
 
   // ─── Sales Performance ─────────────────────────────────────────────────────
   sales: router({
-    agents: protectedProcedure.query(async () => {
+    agents: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(salesAgents)
-        .where(eq(salesAgents.status, 'active'))
+        .where(and(eq(salesAgents.status, 'active'), eq(salesAgents.workspaceId, ctx.workspaceId)))
         .orderBy(desc(salesAgents.totalRevenue));
     }),
 
-    agentActivities: protectedProcedure.input(z.object({ agentId: z.number() })).query(async ({ input }) => {
+    agentActivities: workspaceProcedure.input(z.object({ agentId: z.number() })).query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(salesActivities)
-        .where(eq(salesActivities.agentId, input.agentId))
+        .where(and(eq(salesActivities.agentId, input.agentId), eq(salesActivities.workspaceId, ctx.workspaceId)))
         .orderBy(desc(salesActivities.createdAt))
         .limit(20);
     }),
 
-    activityStats: protectedProcedure.query(async () => {
+    activityStats: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -390,11 +395,12 @@ export const appRouter = router({
         closes: sql<number>`SUM(CASE WHEN type='close' THEN 1 ELSE 0 END)`,
       }).from(salesActivities)
         .leftJoin(salesAgents, eq(salesActivities.agentId, salesAgents.id))
+        .where(eq(salesActivities.workspaceId, ctx.workspaceId))
         .groupBy(salesActivities.agentId, salesAgents.name)
         .orderBy(desc(count()));
     }),
 
-    teamStats: protectedProcedure.query(async () => {
+    teamStats: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return null;
       const [stats] = await db.select({
@@ -405,22 +411,22 @@ export const appRouter = router({
         totalConversions: sum(salesAgents.totalConversions),
         avgResponseTime: avg(salesAgents.avgResponseTime),
         avgFollowUpRate: avg(salesAgents.followUpRate),
-      }).from(salesAgents).where(eq(salesAgents.status, 'active'));
+      }).from(salesAgents).where(and(eq(salesAgents.status, 'active'), eq(salesAgents.workspaceId, ctx.workspaceId)));
       return stats;
     }),
   }),
 
   // ─── Funnel Diagnosis ──────────────────────────────────────────────────────
   funnel: router({
-    bottlenecks: protectedProcedure.query(async () => {
+    bottlenecks: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(funnelBottlenecks)
-        .where(eq(funnelBottlenecks.isResolved, false))
+        .where(and(eq(funnelBottlenecks.isResolved, false), eq(funnelBottlenecks.workspaceId, ctx.workspaceId)))
         .orderBy(desc(funnelBottlenecks.revenueImpact));
     }),
 
-    overview: protectedProcedure.query(async () => {
+    overview: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return null;
 
@@ -431,7 +437,7 @@ export const appRouter = router({
         revenue: sql<number>`COALESCE(SUM(revenue),0)`,
         avgCpl: sql<number>`COALESCE(AVG(costPerLead),0)`,
         avgCtr: sql<number>`COALESCE(AVG(ctr),0)`,
-      }).from(adInsights).where(gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`));
+      }).from(adInsights).where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`)));
 
       const [leadsMetrics] = await db.select({
         total: count(),
@@ -439,13 +445,13 @@ export const appRouter = router({
         qualified: sql<number>`SUM(CASE WHEN status='qualified' THEN 1 ELSE 0 END)`,
         fake: sql<number>`SUM(CASE WHEN isFake=1 THEN 1 ELSE 0 END)`,
         avgResponseTime: avg(leads.responseTimeSeconds),
-      }).from(leads);
+      }).from(leads).where(eq(leads.workspaceId, ctx.workspaceId));
 
       const [salesMetrics] = await db.select({
         totalAgents: count(),
         avgConversionRate: avg(salesAgents.conversionRate),
         totalRevenue: sum(salesAgents.totalRevenue),
-      }).from(salesAgents).where(eq(salesAgents.status, 'active'));
+      }).from(salesAgents).where(and(eq(salesAgents.status, 'active'), eq(salesAgents.workspaceId, ctx.workspaceId)));
 
       const countryData = await db.select({
         country: adInsights.country,
@@ -455,13 +461,13 @@ export const appRouter = router({
         revenue: sql<number>`COALESCE(SUM(revenue),0)`,
         avgCpl: sql<number>`COALESCE(AVG(costPerLead),0)`,
       }).from(adInsights)
-        .where(gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`))
+        .where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`)))
         .groupBy(adInsights.country);
 
       return { adsMetrics, leadsMetrics, salesMetrics, countryData };
     }),
 
-    countryAnalysis: protectedProcedure.query(async () => {
+    countryAnalysis: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       const adsData = await db.select({
@@ -472,7 +478,7 @@ export const appRouter = router({
         revenue: sql<number>`COALESCE(SUM(revenue),0)`,
         avgCpl: sql<number>`COALESCE(AVG(costPerLead),0)`,
       }).from(adInsights)
-        .where(gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`))
+        .where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`)))
         .groupBy(adInsights.country);
 
       const leadsData = await db.select({
@@ -480,7 +486,7 @@ export const appRouter = router({
         total: count(),
         converted: sql<number>`SUM(CASE WHEN status='converted' THEN 1 ELSE 0 END)`,
         avgScore: avg(leads.leadScore),
-      }).from(leads).groupBy(leads.country);
+      }).from(leads).where(eq(leads.workspaceId, ctx.workspaceId)).groupBy(leads.country);
 
       return adsData.map(a => {
         const l = leadsData.find(x => x.country === a.country) || { total: 0, converted: 0, avgScore: 0 };
@@ -494,29 +500,30 @@ export const appRouter = router({
 
   // ─── Recommendations ───────────────────────────────────────────────────────
   recommendations: router({
-    list: protectedProcedure.query(async () => {
+    list: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(recommendations)
+        .where(eq(recommendations.workspaceId, ctx.workspaceId))
         .orderBy(
           sql`FIELD(priority,'critical','high','medium','low')`,
           desc(recommendations.estimatedImpact)
         );
     }),
 
-    updateStatus: protectedProcedure.input(z.object({
+    updateStatus: workspaceProcedure.input(z.object({
       id: z.number(),
       status: z.enum(['pending', 'in_progress', 'completed', 'dismissed']),
-    })).mutation(async ({ input }) => {
+    })).mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) return null;
       await db.update(recommendations)
         .set({ status: input.status })
-        .where(eq(recommendations.id, input.id));
+        .where(and(eq(recommendations.id, input.id), eq(recommendations.workspaceId, ctx.workspaceId)));
       return { success: true };
     }),
 
-    generateAI: protectedProcedure.query(async () => {
+    generateAI: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return null;
 
@@ -526,11 +533,11 @@ export const appRouter = router({
         conversions: sql<number>`COALESCE(SUM(conversions),0)`,
         revenue: sql<number>`COALESCE(SUM(revenue),0)`,
         avgCpl: sql<number>`COALESCE(AVG(costPerLead),0)`,
-      }).from(adInsights).where(gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 7 DAY)`));
+      }).from(adInsights).where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 7 DAY)`)));
 
-      const agents = await db.select().from(salesAgents).where(eq(salesAgents.status, 'active'));
+      const agents = await db.select().from(salesAgents).where(and(eq(salesAgents.status, 'active'), eq(salesAgents.workspaceId, ctx.workspaceId)));
       const bottlenecks = await db.select().from(funnelBottlenecks)
-        .where(eq(funnelBottlenecks.isResolved, false)).limit(5);
+        .where(and(eq(funnelBottlenecks.isResolved, false), eq(funnelBottlenecks.workspaceId, ctx.workspaceId))).limit(5);
 
       const prompt = `You are a Growth Operating System AI for an online education business. Analyze this data and provide 3 critical insights:
 
@@ -588,22 +595,22 @@ Provide exactly 3 actionable insights in JSON format: [{"title":"...","insight":
 
   // ─── Daily Summary ─────────────────────────────────────────────────────────
   dailySummary: router({
-    latest: protectedProcedure.query(async () => {
+    latest: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return null;
-      const [latest] = await db.select().from(dailySummaries)
+      const [latest] = await db.select().from(dailySummaries).where(eq(dailySummaries.workspaceId, ctx.workspaceId))
         .orderBy(desc(dailySummaries.date)).limit(1);
       return latest;
     }),
 
-    list: protectedProcedure.query(async () => {
+    list: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
-      return db.select().from(dailySummaries)
+      return db.select().from(dailySummaries).where(eq(dailySummaries.workspaceId, ctx.workspaceId))
         .orderBy(desc(dailySummaries.date)).limit(7);
     }),
 
-    generateAI: protectedProcedure.query(async () => {
+    generateAI: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return null;
 
@@ -614,6 +621,7 @@ Provide exactly 3 actionable insights in JSON format: [{"title":"...","insight":
         revenue: sql<number>`COALESCE(SUM(revenue),0)`,
       }).from(adInsights).where(
         and(
+          eq(adInsights.workspaceId, ctx.workspaceId),
           gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 1 DAY)`),
           lte(adInsights.date, sql`NOW()`)
         )
@@ -622,7 +630,7 @@ Provide exactly 3 actionable insights in JSON format: [{"title":"...","insight":
       const [slowAgents] = await db.select({
         count: sql<number>`COUNT(*)`,
         avgTime: avg(salesAgents.avgResponseTime),
-      }).from(salesAgents).where(sql`avgResponseTime > 300`);
+      }).from(salesAgents).where(and(eq(salesAgents.workspaceId, ctx.workspaceId), sql`avgResponseTime > 300`));
 
       const prompt = `Generate a brief daily AI summary for an online education business:
 Yesterday: Spend $${yesterday.spend?.toFixed(0)}, Revenue $${yesterday.revenue?.toFixed(0)}, Leads ${yesterday.leads}, Conversions ${yesterday.conversions}
@@ -649,22 +657,22 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
 
   // ─── Weekly Reports ────────────────────────────────────────────────────────
   weeklyReports: router({
-    list: protectedProcedure.query(async () => {
+    list: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
-      return db.select().from(weeklyReports)
+      return db.select().from(weeklyReports).where(eq(weeklyReports.workspaceId, ctx.workspaceId))
         .orderBy(desc(weeklyReports.weekStart)).limit(4);
     }),
 
-    latest: protectedProcedure.query(async () => {
+    latest: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return null;
-      const [latest] = await db.select().from(weeklyReports)
+      const [latest] = await db.select().from(weeklyReports).where(eq(weeklyReports.workspaceId, ctx.workspaceId))
         .orderBy(desc(weeklyReports.weekStart)).limit(1);
       return latest;
     }),
 
-    trend: protectedProcedure.query(async () => {
+    trend: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -673,7 +681,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         spend: sql<number>`COALESCE(SUM(spend),0)`,
         leads: sql<number>`COALESCE(SUM(leads),0)`,
       }).from(adInsights)
-        .where(gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 28 DAY)`))
+        .where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 28 DAY)`)))
         .groupBy(sql`DATE(date)`)
         .orderBy(sql`DATE(date)`);
     }),
@@ -681,7 +689,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
 
   // ─── Forecasting ───────────────────────────────────────────────────────────
   forecast: router({
-    revenue: protectedProcedure.query(async () => {
+    revenue: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return null;
 
@@ -692,7 +700,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         leads: sql<number>`COALESCE(SUM(leads),0)`,
         conversions: sql<number>`COALESCE(SUM(conversions),0)`,
       }).from(adInsights)
-        .where(gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`))
+        .where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`)))
         .groupBy(sql`DATE(date)`)
         .orderBy(sql`DATE(date)`);
 
@@ -737,15 +745,15 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
 
   // ─── Leaderboards ──────────────────────────────────────────────────────────
   leaderboard: router({
-    agents: protectedProcedure.query(async () => {
+    agents: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(salesAgents)
-        .where(eq(salesAgents.status, 'active'))
+        .where(and(eq(salesAgents.status, 'active'), eq(salesAgents.workspaceId, ctx.workspaceId)))
         .orderBy(desc(salesAgents.totalRevenue));
     }),
 
-    campaigns: protectedProcedure.query(async () => {
+    campaigns: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select({
@@ -765,6 +773,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
           eq(adInsights.campaignId, campaigns.id),
           gte(adInsights.date, sql`DATE_SUB(NOW(), INTERVAL 30 DAY)`)
         ))
+        .where(eq(campaigns.workspaceId, ctx.workspaceId))
         .groupBy(campaigns.id)
         .orderBy(desc(sql`SUM(${adInsights.revenue})`));
     }),
@@ -773,21 +782,21 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
   // ─── Data Sources (legacy pre-v1.1 connections) ─────────────────────────────────
   dataSources: router({
     // ─ Connections ─────────────────────────────────────────────────────────────────
-    listConnections: protectedProcedure.query(async () => {
+    listConnections: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       // Never send access tokens to the browser.
-      const rows = await db.select().from(dataConnections).orderBy(desc(dataConnections.updatedAt));
+      const rows = await db.select().from(dataConnections).where(eq(dataConnections.workspaceId, ctx.workspaceId)).orderBy(desc(dataConnections.updatedAt));
       return rows.map(({ accessToken, ...rest }) => ({ ...rest, hasToken: !!accessToken }));
     }),
 
-    saveConnection: protectedProcedure.input(z.object({
+    saveConnection: workspaceProcedure.input(z.object({
       id: z.number().optional(),
       name: z.string().min(1),
       accessToken: z.string().min(1),
       adAccountId: z.string().min(1),
       syncDays: z.number().default(30),
-    })).mutation(async ({ input }) => {
+    })).mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
       if (input.id) {
@@ -798,10 +807,11 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
           syncDays: input.syncDays,
           status: 'disconnected',
           lastError: null,
-        }).where(eq(dataConnections.id, input.id));
+        }).where(and(eq(dataConnections.id, input.id), eq(dataConnections.workspaceId, ctx.workspaceId)));
         return { id: input.id };
       } else {
         const [result] = await db.insert(dataConnections).values({
+          workspaceId: ctx.workspaceId,
           platform: 'meta_ads',
           name: input.name,
           accessToken: input.accessToken,
@@ -813,10 +823,10 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       }
     }),
 
-    testConnection: protectedProcedure.input(z.object({
+    testConnection: workspaceProcedure.input(z.object({
       accessToken: z.string(),
       adAccountId: z.string(),
-    })).mutation(async ({ input }) => {
+    })).mutation(async ({ ctx, input }) => {
       // Call Meta Graph API to verify the token and account
       try {
         const accountId = `act_${stripActPrefix(input.adAccountId)}`;
@@ -829,13 +839,13 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       }
     }),
 
-    syncConnection: protectedProcedure.input(z.object({
+    syncConnection: workspaceProcedure.input(z.object({
       connectionId: z.number(),
-    })).mutation(async ({ input }) => {
+    })).mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
 
-      const [conn] = await db.select().from(dataConnections).where(eq(dataConnections.id, input.connectionId));
+      const [conn] = await db.select().from(dataConnections).where(and(eq(dataConnections.id, input.connectionId), eq(dataConnections.workspaceId, ctx.workspaceId)));
       if (!conn) throw new Error("Connection not found");
 
       // Mark as syncing
@@ -861,13 +871,13 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         for (const row of rows) {
           // Find or create campaign
           const existingCampaigns = await db.select({ id: campaigns.id })
-            .from(campaigns).where(eq(campaigns.campaignId, row.campaign_id)).limit(1);
+            .from(campaigns).where(and(eq(campaigns.workspaceId, ctx.workspaceId), eq(campaigns.campaignId, row.campaign_id))).limit(1);
 
           let campaignDbId: number;
           if (existingCampaigns.length > 0) {
             campaignDbId = existingCampaigns[0].id;
           } else {
-            const [ins] = await db.insert(campaigns).values({
+            const [ins] = await db.insert(campaigns).values({ workspaceId: ctx.workspaceId,
               campaignId: row.campaign_id,
               accountId: 1,
               name: row.campaign_name,
@@ -883,7 +893,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
 
           const rowDate = new Date(`${row.date_start}T00:00:00.000Z`);
           await db.delete(adInsights).where(and(eq(adInsights.campaignId, campaignDbId), eq(adInsights.date, rowDate)));
-          await db.insert(adInsights).values({
+          await db.insert(adInsights).values({ workspaceId: ctx.workspaceId,
             campaignId: campaignDbId,
             date: rowDate,
             spend: String(row.spend || 0),
@@ -916,27 +926,27 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       }
     }),
 
-    deleteConnection: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+    deleteConnection: workspaceProcedure.input(z.object({ id: z.number() })).mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
-      await db.delete(dataConnections).where(eq(dataConnections.id, input.id));
+      await db.delete(dataConnections).where(and(eq(dataConnections.id, input.id), eq(dataConnections.workspaceId, ctx.workspaceId)));
       return { success: true };
     }),
 
     // ─ Import Jobs ─────────────────────────────────────────────────────────────────
-    listImports: protectedProcedure.query(async () => {
+    listImports: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
-      return db.select().from(importJobs).orderBy(desc(importJobs.createdAt)).limit(20);
+      return db.select().from(importJobs).where(eq(importJobs.workspaceId, ctx.workspaceId)).orderBy(desc(importJobs.createdAt)).limit(20);
     }),
 
-    processImport: protectedProcedure.input(z.object({
+    processImport: workspaceProcedure.input(z.object({
       jobId: z.number(),
-    })).mutation(async ({ input }) => {
+    })).mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
 
-      const [job] = await db.select().from(importJobs).where(eq(importJobs.id, input.jobId));
+      const [job] = await db.select().from(importJobs).where(and(eq(importJobs.id, input.jobId), eq(importJobs.workspaceId, ctx.workspaceId)));
       if (!job) throw new Error("Import job not found");
       if (!job.previewData) throw new Error("No data to import");
 
@@ -949,7 +959,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         let skipped = 0;
 
         // Find or create default account
-        const existingAccounts = await db.select({ id: adsAccounts.id }).from(adsAccounts).limit(1);
+        const existingAccounts = await db.select({ id: adsAccounts.id }).from(adsAccounts).where(eq(adsAccounts.workspaceId, ctx.workspaceId)).limit(1);
         let accountDbId = existingAccounts[0]?.id || 1;
 
         for (const row of rows) {
@@ -976,13 +986,13 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
 
             // Upsert campaign
             const existingCampaigns = await db.select({ id: campaigns.id })
-              .from(campaigns).where(eq(campaigns.campaignId, String(campaignIdRaw))).limit(1);
+              .from(campaigns).where(and(eq(campaigns.workspaceId, ctx.workspaceId), eq(campaigns.campaignId, String(campaignIdRaw)))).limit(1);
 
             let campaignDbId: number;
             if (existingCampaigns.length > 0) {
               campaignDbId = existingCampaigns[0].id;
             } else {
-              const [ins] = await db.insert(campaigns).values({
+              const [ins] = await db.insert(campaigns).values({ workspaceId: ctx.workspaceId,
                 campaignId: String(campaignIdRaw),
                 accountId: accountDbId,
                 name: campaignName,
@@ -993,7 +1003,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
             }
 
              const costPerLead = leads > 0 ? spend / leads : 0;
-            await db.insert(adInsights).values({
+            await db.insert(adInsights).values({ workspaceId: ctx.workspaceId,
               campaignId: campaignDbId,
               date: parsedDate,
               spend: String(spend),
@@ -1029,15 +1039,15 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       }
     }),
 
-     deleteImport: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+     deleteImport: workspaceProcedure.input(z.object({ id: z.number() })).mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
-      await db.delete(importJobs).where(eq(importJobs.id, input.id));
+      await db.delete(importJobs).where(and(eq(importJobs.id, input.id), eq(importJobs.workspaceId, ctx.workspaceId)));
       return { success: true };
     }),
-    fetchAdAccounts: protectedProcedure
+    fetchAdAccounts: workspaceProcedure
       .input(z.object({ accessToken: z.string().min(10) }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
         // Call Meta Graph API to get all ad accounts accessible by this token (paginated)
         const data = await graphGetAll<any>('me/adaccounts', input.accessToken, {
           fields: 'id,name,account_id,account_status,currency,timezone_name,business',
@@ -1060,10 +1070,10 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         } catch { /* non-critical */ }
         return { accounts, userName, total: accounts.length };
       }),
-    syncNow: protectedProcedure.mutation(async () => {
+    syncNow: workspaceProcedure.mutation(async ({ ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("DB unavailable");
-      const all = await db.select().from(dataConnections).orderBy(desc(dataConnections.updatedAt));
+      const all = await db.select().from(dataConnections).where(eq(dataConnections.workspaceId, ctx.workspaceId)).orderBy(desc(dataConnections.updatedAt));
       const conn = all.find(c => c.status === 'connected' || c.status === 'syncing');
       if (!conn) throw new Error("No active Meta Ads connection found. Please connect your account first.");
       const startTime = Date.now();
@@ -1097,17 +1107,17 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
               const leads = extractLeads(row.actions);
               const revenue = extractPurchaseValue(row.action_values);
               const rowDate = row.date_start ? new Date(`${row.date_start}T00:00:00.000Z`) : new Date();
-              const existingCampaigns = await db.select({ id: campaigns.id }).from(campaigns).where(eq(campaigns.campaignId, String(row.campaign_id))).limit(1);
+              const existingCampaigns = await db.select({ id: campaigns.id }).from(campaigns).where(and(eq(campaigns.workspaceId, ctx.workspaceId), eq(campaigns.campaignId, String(row.campaign_id)))).limit(1);
               let campaignDbId: number;
               if (existingCampaigns.length > 0) {
                 campaignDbId = existingCampaigns[0].id;
               } else {
-                const [ins] = await db.insert(campaigns).values({ campaignId: String(row.campaign_id), accountId: conn.id, name: row.campaign_name || 'Unknown', status: 'active' });
+                const [ins] = await db.insert(campaigns).values({ workspaceId: ctx.workspaceId, campaignId: String(row.campaign_id), accountId: conn.id, name: row.campaign_name || 'Unknown', status: 'active' });
                 campaignDbId = (ins as any).insertId;
               }
               // Replace any existing row for this campaign/day so re-syncs don't duplicate.
               await db.delete(adInsights).where(and(eq(adInsights.campaignId, campaignDbId), eq(adInsights.date, rowDate)));
-              await db.insert(adInsights).values({ campaignId: campaignDbId, date: rowDate, spend: String(spend), impressions, clicks, ctr: String(ctr), cpc: String(cpc), cpm: String(cpm), reach, leads, costPerLead: leads > 0 ? String(spend / leads) : '0', conversions: extractPurchases(row.actions), revenue: String(revenue) } as any);
+              await db.insert(adInsights).values({ workspaceId: ctx.workspaceId, campaignId: campaignDbId, date: rowDate, spend: String(spend), impressions, clicks, ctr: String(ctr), cpc: String(cpc), cpm: String(cpm), reach, leads, costPerLead: leads > 0 ? String(spend / leads) : '0', conversions: extractPurchases(row.actions), revenue: String(revenue) } as any);
               imported++;
             } catch { errors++; }
           }
@@ -1132,12 +1142,13 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         throw e;
       }
     }),
-    connectionStatus: protectedProcedure.query(async () => {
+    connectionStatus: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return { hasActiveConnection: false, lastSyncedAt: null as Date | null, connectionName: null as string | null };
       const all = await db
         .select({ id: dataConnections.id, name: dataConnections.name, lastSyncAt: dataConnections.lastSyncAt, status: dataConnections.status })
         .from(dataConnections)
+        .where(eq(dataConnections.workspaceId, ctx.workspaceId))
         .orderBy(desc(dataConnections.updatedAt));
       const active = all.find(c => c.status === 'connected' || c.status === 'syncing');
       return {
@@ -1154,12 +1165,12 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
      * Overall KPI summary across all imported adInsights rows.
      * Accepts an optional date range (ISO strings). Defaults to last 30 days.
      */
-    summary: protectedProcedure
+    summary: workspaceProcedure
       .input(z.object({
         from: z.string().optional(), // YYYY-MM-DD
         to: z.string().optional(),   // YYYY-MM-DD
       }).optional())
-      .query(async ({ input }) => {
+      .query(async ({ ctx, input }) => {
         const db = await getDb();
         if (!db) return null;
         const from = input?.from ? new Date(`${input.from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 86_400_000);
@@ -1177,7 +1188,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
             rowCount:         sql<number>`COUNT(*)`,
           })
           .from(adInsights)
-          .where(and(gte(adInsights.date, from), lte(adInsights.date, to)));
+          .where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, from), lte(adInsights.date, to)));
         const leads = Number(row?.totalLeads ?? 0);
         const spend = Number(row?.totalSpend ?? 0);
         return {
@@ -1197,13 +1208,13 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
     /**
      * Daily aggregated metrics for trend charts.
      */
-    dailyTrend: protectedProcedure
+    dailyTrend: workspaceProcedure
       .input(z.object({
         from: z.string().optional(),
         to:   z.string().optional(),
         metric: z.enum(["spend", "impressions", "clicks", "leads", "ctr", "cpm", "cpc"]).optional(),
       }).optional())
-      .query(async ({ input }) => {
+      .query(async ({ ctx, input }) => {
         const db = await getDb();
         if (!db) return [];
         const from = input?.from ? new Date(`${input.from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 86_400_000);
@@ -1221,7 +1232,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
             avgCpc:      sql<number>`COALESCE(AVG(CAST(${adInsights.cpc} AS DECIMAL(10,4))), 0)`,
           })
           .from(adInsights)
-          .where(and(gte(adInsights.date, from), lte(adInsights.date, to)))
+          .where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, from), lte(adInsights.date, to)))
           .groupBy(sql`DATE(${adInsights.date})`)
           .orderBy(sql`DATE(${adInsights.date})`);
         return rows.map(r => ({
@@ -1241,13 +1252,13 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
     /**
      * Per-campaign aggregated metrics for the breakdown table.
      */
-    campaignBreakdown: protectedProcedure
+    campaignBreakdown: workspaceProcedure
       .input(z.object({
         from:  z.string().optional(),
         to:    z.string().optional(),
         limit: z.number().min(1).max(200).optional(),
       }).optional())
-      .query(async ({ input }) => {
+      .query(async ({ ctx, input }) => {
         const db = await getDb();
         if (!db) return [];
         const from  = input?.from  ? new Date(`${input.from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 86_400_000);
@@ -1268,7 +1279,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
           })
           .from(adInsights)
           .innerJoin(campaigns, eq(adInsights.campaignId, campaigns.id))
-          .where(and(gte(adInsights.date, from), lte(adInsights.date, to)))
+          .where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, from), lte(adInsights.date, to)))
           .groupBy(campaigns.id, campaigns.name)
           .orderBy(sql`SUM(CAST(${adInsights.spend} AS DECIMAL(14,4))) DESC`)
           .limit(lim);
@@ -1291,12 +1302,12 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
      * Spend, leads, and CPL grouped by country for the given date range.
      * Rows with a NULL/empty country are grouped under "Unknown".
      */
-    countryBreakdown: protectedProcedure
+    countryBreakdown: workspaceProcedure
       .input(z.object({
         from: z.string().optional(),
         to:   z.string().optional(),
       }).optional())
-      .query(async ({ input }) => {
+      .query(async ({ ctx, input }) => {
         const db = await getDb();
         if (!db) return [];
         const from = input?.from ? new Date(`${input.from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 86_400_000);
@@ -1310,7 +1321,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
             clicks:      sql<number>`COALESCE(SUM(${adInsights.clicks}), 0)`,
           })
           .from(adInsights)
-          .where(and(gte(adInsights.date, from), lte(adInsights.date, to)))
+          .where(and(eq(adInsights.workspaceId, ctx.workspaceId), gte(adInsights.date, from), lte(adInsights.date, to)))
           .groupBy(sql`COALESCE(NULLIF(TRIM(${adInsights.country}), ''), 'Unknown')`)
           .orderBy(sql`SUM(CAST(${adInsights.spend} AS DECIMAL(14,4))) DESC`)
           .limit(20);
@@ -1327,7 +1338,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
 
   // ─── WhatsApp Webhook Settings ────────────────────────────────────────────
   whatsapp: router({
-    getConfig: protectedProcedure.query(() => {
+    getConfig: workspaceProcedure.query(() => {
       return {
         webhookUrl: null as string | null, // will be set after publish
         // Shown only to signed-in users; there is no insecure default any more.
@@ -1344,7 +1355,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
       };
     }),
 
-    getRecentLeads: protectedProcedure.query(async () => {
+    getRecentLeads: workspaceProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
       // Return leads that came from WhatsApp (stored in contactInfo.channel)
@@ -1359,6 +1370,7 @@ Write 2-3 sentences highlighting: 1) ROAS performance 2) Key issue to fix today 
         firstContactAt: leads.firstContactAt,
         contactInfo: leads.contactInfo,
       }).from(leads)
+        .where(eq(leads.workspaceId, ctx.workspaceId))
         .orderBy(desc(leads.firstContactAt))
         .limit(50);
       return result.filter((l: any) => {

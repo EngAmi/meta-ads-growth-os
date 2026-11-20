@@ -64,6 +64,13 @@
       "when": 1776178015577,
       "tag": "0008_military_mimic",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1795158780718,
+      "tag": "0009_legacy_workspace_isolation",
+      "breakpoints": true
     }
   ]
 }
