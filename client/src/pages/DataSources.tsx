@@ -749,8 +749,8 @@ function WhatsAppTab() {
           <div className="space-y-2">
             <Label className="text-slate-300 text-xs uppercase tracking-wider">Verify Token</Label>
             <div className="flex items-center gap-2 p-3 rounded-lg bg-slate-800/60 border border-slate-700 font-mono text-sm text-yellow-300">
-              <span className="flex-1">{config?.verifyToken || "growth_os_verify_token"}</span>
-              <CopyButton text={config?.verifyToken || "growth_os_verify_token"} />
+              <span className="flex-1">{config?.verifyToken || "Set WHATSAPP_VERIFY_TOKEN in your environment"}</span>
+              {config?.verifyToken && <CopyButton text={config.verifyToken} />}
             </div>
             <p className="text-xs text-slate-500">
               You can override this by adding <code className="text-violet-300">WHATSAPP_VERIFY_TOKEN</code> to your environment secrets.

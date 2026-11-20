@@ -75,15 +75,16 @@ export const dataSourcesRouter = router({
         .insert(integrations)
         .values({
           workspaceId,
-          provider: input.provider,
+          // Store the same provider key the OAuth flow uses ("meta_ads"); storing
+          // "meta" created a duplicate integration for the same ad account.
+          provider: "meta_ads",
           accessToken: input.accessToken,
-          metaAccountId: input.adAccountId,
+          metaAccountId: input.adAccountId.replace(/^act_/, ""),
           status: "active",
         })
         .onDuplicateKeyUpdate({
           set: {
             accessToken: input.accessToken,
-            metaAccountId: input.adAccountId,
             status: "active",
             lastSyncError: null,
           },
@@ -335,6 +336,13 @@ export const dataSourcesRouter = router({
       }
 
       const { longLivedToken, workspaceId } = session;
+
+      // Only accept an account that was actually returned for this token.
+      const allowed = (JSON.parse(session.adAccountsJson) as Array<{ account_id: string }>)
+        .some((a) => a.account_id === input.accountId);
+      if (!allowed) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Ad account not part of this OAuth session" });
+      }
       const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
 
       // Upsert integration for the selected account
