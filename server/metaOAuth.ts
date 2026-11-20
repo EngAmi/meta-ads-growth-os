@@ -17,7 +17,8 @@ import type { Express, Request, Response } from "express";
 import { randomBytes } from "crypto";
 import { eq, and } from "drizzle-orm";
 import { getDb } from "./db";
-import { integrations, metaOAuthSessions, workspaces } from "../drizzle/schema";
+import { integrations, metaOAuthSessions } from "../drizzle/schema";
+import { resolveOrCreateWorkspace as resolveWorkspaceId } from "./routers/_workspace";
 import { ENV } from "./_core/env";
 import { sdk } from "./_core/sdk";
 import {
@@ -67,33 +68,6 @@ function getOrigin(req: Request): string {
   const host = req.headers["x-forwarded-host"] ?? req.headers.host;
   const proto = (req.headers["x-forwarded-proto"] as string | undefined) ?? req.protocol;
   return `${proto}://${host}`;
-}
-
-/** Resolve the workspace ID for the authenticated user, auto-creating if needed. */
-async function resolveWorkspaceId(userId: number, userName?: string | null): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new Error("Database unavailable");
-
-  const existing = await db
-    .select({ id: workspaces.id })
-    .from(workspaces)
-    .where(eq(workspaces.ownerId, userId))
-    .limit(1);
-
-  if (existing.length > 0) return existing[0].id;
-
-  await db.insert(workspaces).values({
-    ownerId: userId,
-    name: userName ? `${userName}'s Workspace` : "My Workspace",
-  });
-
-  const created = await db
-    .select({ id: workspaces.id })
-    .from(workspaces)
-    .where(eq(workspaces.ownerId, userId))
-    .limit(1);
-
-  return created[0].id;
 }
 
 interface MetaAdAccount {

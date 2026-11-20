@@ -34,19 +34,23 @@ export type InsertUser = typeof users.$inferInsert;
 // ─── Ads Accounts ─────────────────────────────────────────────────────────────
 export const adsAccounts = mysqlTable("ads_accounts", {
   id: int("id").autoincrement().primaryKey(),
-  accountId: varchar("accountId", { length: 64 }).notNull().unique(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
+  accountId: varchar("accountId", { length: 64 }).notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   currency: varchar("currency", { length: 10 }).default("USD").notNull(),
   timezone: varchar("timezone", { length: 64 }).default("UTC").notNull(),
   status: mysqlEnum("status", ["active", "inactive"]).default("active").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => [uniqueIndex("idx_aa_ws_accountId").on(t.workspaceId, t.accountId)]);
 
 // ─── Campaigns (legacy) ───────────────────────────────────────────────────────
 export const campaigns = mysqlTable("campaigns", {
   id: int("id").autoincrement().primaryKey(),
-  campaignId: varchar("campaignId", { length: 64 }).notNull().unique(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
+  campaignId: varchar("campaignId", { length: 64 }).notNull(),
   accountId: int("accountId").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   objective: varchar("objective", { length: 64 }),
@@ -58,12 +62,14 @@ export const campaigns = mysqlTable("campaigns", {
   country: varchar("country", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => [uniqueIndex("idx_camp_ws_campaignId").on(t.workspaceId, t.campaignId)]);
 
 // ─── Ad Sets (legacy) ─────────────────────────────────────────────────────────
 export const adSets = mysqlTable("ad_sets", {
   id: int("id").autoincrement().primaryKey(),
-  adSetId: varchar("adSetId", { length: 64 }).notNull().unique(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
+  adSetId: varchar("adSetId", { length: 64 }).notNull(),
   campaignId: int("campaignId").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   status: mysqlEnum("status", ["active", "paused", "completed"]).default("active").notNull(),
@@ -72,12 +78,14 @@ export const adSets = mysqlTable("ad_sets", {
   dailyBudget: decimal("dailyBudget", { precision: 12, scale: 2 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => [uniqueIndex("idx_as_ws_adSetId").on(t.workspaceId, t.adSetId)]);
 
 // ─── Ads ──────────────────────────────────────────────────────────────────────
 export const ads = mysqlTable("ads", {
   id: int("id").autoincrement().primaryKey(),
-  adId: varchar("adId", { length: 64 }).notNull().unique(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
+  adId: varchar("adId", { length: 64 }).notNull(),
   adSetId: int("adSetId").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   status: mysqlEnum("status", ["active", "paused", "completed"]).default("active").notNull(),
@@ -85,11 +93,13 @@ export const ads = mysqlTable("ads", {
   previewUrl: text("previewUrl"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => [uniqueIndex("idx_ad_ws_adId").on(t.workspaceId, t.adId)]);
 
 // ─── Ad Insights (daily metrics, legacy) ──────────────────────────────────────
 export const adInsights = mysqlTable("ad_insights", {
   id: int("id").autoincrement().primaryKey(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
   campaignId: int("campaignId").notNull(),
   adSetId: int("adSetId"),
   adId: int("adId"),
@@ -108,11 +118,13 @@ export const adInsights = mysqlTable("ad_insights", {
   revenue: decimal("revenue", { precision: 12, scale: 2 }).default("0"),
   country: varchar("country", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => [index("idx_ai_ws").on(t.workspaceId)]);
 
 // ─── Leads ────────────────────────────────────────────────────────────────────
 export const leads = mysqlTable("leads", {
   id: int("id").autoincrement().primaryKey(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
   campaignId: int("campaignId"),
   adSetId: int("adSetId"),
   adId: int("adId"),
@@ -131,11 +143,13 @@ export const leads = mysqlTable("leads", {
   contactInfo: json("contactInfo"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => [index("idx_ld_ws").on(t.workspaceId)]);
 
 // ─── Sales Agents ─────────────────────────────────────────────────────────────
 export const salesAgents = mysqlTable("sales_agents", {
   id: int("id").autoincrement().primaryKey(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
   name: varchar("name", { length: 255 }).notNull(),
   email: varchar("email", { length: 320 }),
   phone: varchar("phone", { length: 32 }),
@@ -149,11 +163,13 @@ export const salesAgents = mysqlTable("sales_agents", {
   followUpRate: decimal("followUpRate", { precision: 6, scale: 2 }).default("0"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => [index("idx_sa_ws").on(t.workspaceId)]);
 
 // ─── Sales Activities ─────────────────────────────────────────────────────────
 export const salesActivities = mysqlTable("sales_activities", {
   id: int("id").autoincrement().primaryKey(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
   agentId: int("agentId").notNull(),
   leadId: int("leadId").notNull(),
   type: mysqlEnum("type", ["call", "message", "email", "follow_up", "meeting", "close"]).notNull(),
@@ -161,11 +177,13 @@ export const salesActivities = mysqlTable("sales_activities", {
   notes: text("notes"),
   duration: int("duration"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => [index("idx_sact_ws").on(t.workspaceId)]);
 
 // ─── Funnel Bottlenecks ──────────────────────────────────────────────────────
 export const funnelBottlenecks = mysqlTable("funnel_bottlenecks", {
   id: int("id").autoincrement().primaryKey(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
   stage: mysqlEnum("stage", ["ads", "leads", "sales", "revenue", "funnel"]).notNull(),
   severity: mysqlEnum("severity", ["critical", "warning", "info"]).default("info").notNull(),
   title: varchar("title", { length: 255 }).notNull(),
@@ -178,11 +196,13 @@ export const funnelBottlenecks = mysqlTable("funnel_bottlenecks", {
   isResolved: boolean("isResolved").default(false),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => [index("idx_fb_ws").on(t.workspaceId)]);
 
 // ─── Recommendations (legacy) ─────────────────────────────────────────────────
 export const recommendations = mysqlTable("recommendations", {
   id: int("id").autoincrement().primaryKey(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
   category: mysqlEnum("category", ["ads", "leads", "sales", "funnel"]).notNull(),
   priority: mysqlEnum("priority", ["critical", "high", "medium", "low"]).default("medium").notNull(),
   title: varchar("title", { length: 255 }).notNull(),
@@ -193,11 +213,13 @@ export const recommendations = mysqlTable("recommendations", {
   status: mysqlEnum("recStatus", ["pending", "in_progress", "completed", "dismissed"]).default("pending").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => [index("idx_rec_ws").on(t.workspaceId)]);
 
 // ─── Daily Summaries (legacy) ─────────────────────────────────────────────────
 export const dailySummaries = mysqlTable("daily_summaries", {
   id: int("id").autoincrement().primaryKey(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
   date: timestamp("date").notNull(),
   totalSpend: decimal("totalSpend", { precision: 12, scale: 2 }).default("0"),
   totalRevenue: decimal("totalRevenue", { precision: 14, scale: 2 }).default("0"),
@@ -209,11 +231,13 @@ export const dailySummaries = mysqlTable("daily_summaries", {
   keyAlerts: json("keyAlerts"),
   aiSummary: text("aiSummary"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => [index("idx_ds_ws").on(t.workspaceId)]);
 
 // ─── Data Connections (Meta API) ─────────────────────────────────────────────
 export const dataConnections = mysqlTable("data_connections", {
   id: int("id").autoincrement().primaryKey(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
   platform: mysqlEnum("platform", ["meta_ads"]).default("meta_ads").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   accessToken: text("accessToken"),
@@ -225,7 +249,7 @@ export const dataConnections = mysqlTable("data_connections", {
   syncDays: int("syncDays").default(30),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => [index("idx_dc_ws").on(t.workspaceId)]);
 
 export type DataConnection = typeof dataConnections.$inferSelect;
 export type InsertDataConnection = typeof dataConnections.$inferInsert;
@@ -233,6 +257,8 @@ export type InsertDataConnection = typeof dataConnections.$inferInsert;
 // ─── Import Jobs (CSV/Excel uploads) ─────────────────────────────────────────
 export const importJobs = mysqlTable("import_jobs", {
   id: int("id").autoincrement().primaryKey(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
   fileName: varchar("fileName", { length: 255 }).notNull(),
   fileSize: int("fileSize"),
   source: mysqlEnum("importSource", ["meta_csv", "meta_excel", "manual"]).default("meta_csv").notNull(),
@@ -245,7 +271,7 @@ export const importJobs = mysqlTable("import_jobs", {
   previewData: json("previewData"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => [index("idx_ij_ws").on(t.workspaceId)]);
 
 export type ImportJob = typeof importJobs.$inferSelect;
 export type InsertImportJob = typeof importJobs.$inferInsert;
@@ -253,6 +279,8 @@ export type InsertImportJob = typeof importJobs.$inferInsert;
 // ─── Weekly Reports ───────────────────────────────────────────────────────────
 export const weeklyReports = mysqlTable("weekly_reports", {
   id: int("id").autoincrement().primaryKey(),
+  /** Owning workspace (tenant). NULL only for rows created before v1.2 — claimed by the first admin request (see routers/_workspace.ts). */
+  workspaceId: int("workspaceId"),
   weekStart: timestamp("weekStart").notNull(),
   weekEnd: timestamp("weekEnd").notNull(),
   totalSpend: decimal("totalSpend", { precision: 12, scale: 2 }).default("0"),
@@ -264,7 +292,7 @@ export const weeklyReports = mysqlTable("weekly_reports", {
   topRecommendations: json("topRecommendations"),
   summary: text("summary"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => [index("idx_wr_ws").on(t.workspaceId)]);
 
 // =============================================================================
 // BUILD SLICE v1.1 — ENGINE TABLES
@@ -334,7 +362,7 @@ export const engineCampaigns = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   (t) => [
-    uniqueIndex("idx_ec_meta_id").on(t.metaCampaignId),
+    uniqueIndex("idx_ec_ws_meta_id").on(t.workspaceId, t.metaCampaignId),
     index("idx_ec_ws_status").on(t.workspaceId, t.status),
   ],
 );
@@ -358,7 +386,7 @@ export const engineAdSets = mysqlTable(
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   (t) => [
-    uniqueIndex("idx_eas_meta_id").on(t.metaAdSetId),
+    uniqueIndex("idx_eas_ws_meta_id").on(t.workspaceId, t.metaAdSetId),
     index("idx_eas_campaign").on(t.campaignId),
     index("idx_eas_ws_status").on(t.workspaceId, t.status),
   ],

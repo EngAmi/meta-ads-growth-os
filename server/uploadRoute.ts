@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import { sdk } from "./_core/sdk";
+import { resolveOrCreateWorkspace } from "./routers/_workspace";
 import { getDb } from "./db";
 import { importJobs } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
@@ -28,7 +29,8 @@ const upload = multer({
 /** Reject unauthenticated uploads before multer buffers the file / XLSX parses it. */
 async function requireAuth(req: any, res: any, next: () => void) {
   try {
-    await sdk.authenticateRequest(req);
+    const user = await sdk.authenticateRequest(req);
+    req.workspaceId = await resolveOrCreateWorkspace(user.id, user.name);
     next();
   } catch {
     res.status(401).json({ error: "Unauthorized" });
@@ -110,6 +112,7 @@ export function registerUploadRoutes(app: Router | any) {
       const source = ext === "csv" ? "meta_csv" : "meta_excel";
 
       const [result] = await db.insert(importJobs).values({
+        workspaceId: req.workspaceId,
         fileName: file.originalname,
         fileSize: file.size,
         source: source as any,
